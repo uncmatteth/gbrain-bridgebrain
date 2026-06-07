@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OS_NAME="$(uname -s)"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+GBRAIN_HOME="${GBRAIN_HOME:-$HOME/.gbrain}"
 SERVICE_HOME="$CODEX_HOME/services/gbrain-chatgpt-embeddings"
 SKILL_NAME="unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit"
 SKILL_DEST="$CODEX_HOME/skills/$SKILL_NAME"
@@ -104,12 +105,12 @@ install -m 0755 "$ROOT/bridge-skill/$SKILL_NAME/scripts/gpt-web-login-bridge.js"
 "$NODE_BIN" "$SKILL_DEST/scripts/gpt-web-login-bridge.js" status
 "$NODE_BIN" "$ROOT/scripts/patch-gbrain-litellm.js"
 
-mkdir -p "$HOME/.gbrain"
-if [[ ! -f "$HOME/.gbrain/config.json" ]]; then
+mkdir -p "$GBRAIN_HOME"
+if [[ ! -f "$GBRAIN_HOME/config.json" ]]; then
   "$GBRAIN_BIN" init --pglite --no-embedding
 fi
 
-"$NODE_BIN" "$ROOT/scripts/configure-gbrain.js" "$HOME/.gbrain/config.json" "$MODEL_NAME" "$DIMENSIONS" "$BASE_URL"
+"$NODE_BIN" "$ROOT/scripts/configure-gbrain.js" "$GBRAIN_HOME/config.json" "$MODEL_NAME" "$DIMENSIONS" "$BASE_URL"
 
 pages="unknown"
 identity_file="$(mktemp)"

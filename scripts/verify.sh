@@ -2,6 +2,7 @@
 set -euo pipefail
 
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+GBRAIN_HOME="${GBRAIN_HOME:-$HOME/.gbrain}"
 SKILL_NAME="unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit"
 BRIDGE_SCRIPT="${BRIDGE_SCRIPT:-$CODEX_HOME/skills/$SKILL_NAME/scripts/gpt-web-login-bridge.js}"
 PORT="${GBRAIN_CHATGPT_EMBED_PORT:-4127}"
@@ -105,7 +106,7 @@ fi
 command -v gbrain >/dev/null 2>&1 || fail "gbrain is missing"
 
 echo "Checking GBrain config..."
-node - "$HOME/.gbrain/config.json" "$MODEL_NAME" "$DIMENSIONS" "$BASE_URL" <<'NODE'
+node - "$GBRAIN_HOME/config.json" "$MODEL_NAME" "$DIMENSIONS" "$BASE_URL" <<'NODE'
 const fs = require('fs');
 const [file, model, dimsRaw, baseUrl] = process.argv.slice(2);
 const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));

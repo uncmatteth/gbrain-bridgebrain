@@ -13,6 +13,7 @@ const CACHE_SCHEMA_VERSION = 2;
 const MAX_TEXT_CHARS = Number(process.env.MAX_TEXT_CHARS || 6000);
 const BRIDGE_TIMEOUT_MS = Number(process.env.BRIDGE_TIMEOUT_MS || 300000);
 const CODEX_BIN = process.env.GPT_WEB_LOGIN_CODEX_BIN || 'codex';
+const SUPPORTED_DIMENSIONS = new Set([768, 1536]);
 const SKILL_NAME = 'unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit';
 const BRIDGE_SCRIPT =
   process.env.BRIDGE_SCRIPT ||
@@ -28,20 +29,26 @@ function normalizeProfile(raw) {
   return 'quality';
 }
 
+function parseSupportedDimensions(raw, label) {
+  const value = Number(raw);
+  if (Number.isInteger(value) && SUPPORTED_DIMENSIONS.has(value)) return value;
+  throw new Error(`${label} must be one of: 768, 1536`);
+}
+
 const PROFILE = normalizeProfile(
   process.env.BRIDGEBRAIN_PROFILE ||
     process.env.GBRAIN_CHATGPT_EMBED_PROFILE ||
     process.env.GBRAIN_CHATGPT_EMBED_MODE ||
     (process.env.BRIDGEBRAIN_MOCK_SIGNATURES === '1' ? 'mock' : 'quality'),
 );
-const DEFAULT_DIMENSIONS = Number(
+const DEFAULT_DIMENSIONS = parseSupportedDimensions(
   process.env.GBRAIN_CHATGPT_EMBED_DIMENSIONS || (PROFILE === 'compat' ? 768 : 1536),
+  'GBRAIN_CHATGPT_EMBED_DIMENSIONS',
 );
 const MODEL_NAME =
   process.env.GBRAIN_CHATGPT_EMBED_MODEL ||
   process.env.MODEL_NAME ||
   `chatgpt-bridge-semantic-hash-${DEFAULT_DIMENSIONS}`;
-const SUPPORTED_DIMENSIONS = new Set([768, 1536]);
 
 const stats = {
   started_at: new Date().toISOString(),
@@ -124,6 +131,26 @@ function embeddingInputsFromRequest(rawInput) {
   if (typeof rawInput === 'string') return [rawInput];
   if (Array.isArray(rawInput) && rawInput.every((item) => typeof item === 'string')) return rawInput;
   throw requestError(400, 'invalid_request_error', 'input must be a string or an array of strings');
+}
+
+function isTrustedOrigin(origin) {
+  if (!origin || origin === 'null') return true;
+  try {
+    const parsed = new URL(origin);
+    return ['127.0.0.1', 'localhost', '[::1]'].includes(parsed.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function assertTrustedEmbeddingRequest(req) {
+  const contentType = String(req.headers['content-type'] || '').toLowerCase();
+  if (!contentType.startsWith('application/json')) {
+    throw requestError(415, 'unsupported_media_type', 'content-type must be application/json');
+  }
+  if (!isTrustedOrigin(req.headers.origin)) {
+    throw requestError(403, 'forbidden_origin', 'origin is not allowed');
+  }
 }
 
 function extractJsonObject(text) {
@@ -347,14 +374,14 @@ function addFeature(vector, feature, weight) {
   vector[index] += sign * weight;
 }
 
-function supportedDimensionsOrDefault(dimensions) {
+function supportedDimensions(dimensions) {
   const requested = Number(dimensions);
   if (Number.isInteger(requested) && SUPPORTED_DIMENSIONS.has(requested)) return requested;
-  return SUPPORTED_DIMENSIONS.has(DEFAULT_DIMENSIONS) ? DEFAULT_DIMENSIONS : 1536;
+  throw new Error(`unsupported embedding dimensions: ${dimensions}`);
 }
 
 function vectorFromSignature(signature, dimensions) {
-  const dim = supportedDimensionsOrDefault(dimensions);
+  const dim = supportedDimensions(dimensions);
   const vector = new Array(dim).fill(0);
   const flattened = flattenSignature(signature);
   const tokens = tokenize(flattened);
@@ -512,6 +539,7 @@ async function handle(req, res) {
 
   if (req.method === 'POST' && (url.pathname === '/embeddings' || url.pathname === '/v1/embeddings')) {
     try {
+      assertTrustedEmbeddingRequest(req);
       const request = await readJson(req);
       const inputs = embeddingInputsFromRequest(request.input);
       const normalizedInputs = inputs.map(normalizeText);

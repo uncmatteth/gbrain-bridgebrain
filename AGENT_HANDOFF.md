@@ -70,6 +70,8 @@ The installer should:
 
 If GBrain already has pages, do not reinitialize or wipe the database. Configure provider settings and report the migration/reindex requirement.
 
+If `GBRAIN_HOME` is set, all installer and verifier config-path work must use that directory instead of assuming the default GBrain home.
+
 ## Verify
 
 Run repo checks first:

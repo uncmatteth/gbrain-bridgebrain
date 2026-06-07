@@ -72,6 +72,8 @@ cd gbrain-bridgebrain
 
 The installer copies the bundled bridge skill into the current user's Codex home, installs the adapter service, patches GBrain's LiteLLM model-id check, configures GBrain, and runs verification.
 
+If you use a non-default GBrain home, set `GBRAIN_HOME` before installing and verifying.
+
 If GBrain already has pages, the installer does not wipe the brain. It updates provider config and reports that a supported migration or reindex is needed if existing embeddings use another width.
 
 ## Compatibility Mode

@@ -11,21 +11,23 @@ const serverPath = path.join(root, 'src', 'gbrain-chatgpt-embeddings-server.js')
 const port = Number(process.env.BRIDGEBRAIN_TEST_PORT || 4137);
 const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridgebrain-cache-'));
 
-function request(method, pathname, body) {
+function request(method, pathname, body, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
     const payload = body ? JSON.stringify(body) : '';
+    const headers = payload
+      ? {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload),
+          ...extraHeaders,
+        }
+      : { ...extraHeaders };
     const req = http.request(
       {
         method,
         hostname: '127.0.0.1',
         port,
         path: pathname,
-        headers: payload
-          ? {
-              'content-type': 'application/json',
-              'content-length': Buffer.byteLength(payload),
-            }
-          : {},
+        headers,
       },
       (res) => {
         let data = '';
@@ -65,7 +67,39 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+async function assertInvalidStartupDimensions() {
+  const child = spawn(process.execPath, [serverPath], {
+    cwd: root,
+    stdio: ['ignore', 'ignore', 'pipe'],
+    env: {
+      ...process.env,
+      GBRAIN_CHATGPT_EMBED_PORT: '4199',
+      GBRAIN_CHATGPT_EMBED_PROFILE: 'mock',
+      GBRAIN_CHATGPT_EMBED_DIMENSIONS: '1024',
+      CACHE_DIR: cacheDir,
+    },
+  });
+  let stderr = '';
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+  const code = await new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      resolve(null);
+    }, 3000);
+    child.on('exit', (value) => {
+      clearTimeout(timer);
+      resolve(value);
+    });
+  });
+  assert(code !== null && code !== 0, 'invalid startup dimensions should fail before serving');
+  assert(stderr.includes('GBRAIN_CHATGPT_EMBED_DIMENSIONS must be one of'), 'invalid startup dimensions error missing');
+}
+
 async function main() {
+  await assertInvalidStartupDimensions();
+
   const child = spawn(process.execPath, [serverPath], {
     cwd: root,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -107,6 +141,28 @@ async function main() {
     });
     assert(single.status === 200, `single string embedding status ${single.status}`);
     assert(single.json.data[0].embedding.length === 1536, `expected 1536 dims, got ${single.json.data[0].embedding.length}`);
+
+    const wrongContentType = await request(
+      'POST',
+      '/v1/embeddings',
+      {
+        model: 'chatgpt-bridge-semantic-hash-1536',
+        input: 'BridgeBrain wrong content type test',
+      },
+      { 'content-type': 'text/plain' },
+    );
+    assert(wrongContentType.status === 415, `wrong content-type status ${wrongContentType.status}`);
+
+    const badOrigin = await request(
+      'POST',
+      '/v1/embeddings',
+      {
+        model: 'chatgpt-bridge-semantic-hash-1536',
+        input: 'BridgeBrain bad origin test',
+      },
+      { origin: 'https://example.com' },
+    );
+    assert(badOrigin.status === 403, `bad origin status ${badOrigin.status}`);
 
     const explicitDefault = await request('POST', '/v1/embeddings', {
       model: 'chatgpt-bridge-semantic-hash-1536',

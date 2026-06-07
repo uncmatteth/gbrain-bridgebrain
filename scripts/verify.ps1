@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME ".codex" }
+$GbrainHome = if ($env:GBRAIN_HOME) { $env:GBRAIN_HOME } else { Join-Path $HOME ".gbrain" }
 $SkillName = "unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit"
 $BridgeScript = if ($env:BRIDGE_SCRIPT) { $env:BRIDGE_SCRIPT } else { Join-Path $CodexHome "skills\$SkillName\scripts\gpt-web-login-bridge.js" }
 $Port = if ($env:GBRAIN_CHATGPT_EMBED_PORT) { $env:GBRAIN_CHATGPT_EMBED_PORT } else { "4127" }
@@ -61,7 +62,7 @@ if ($SkipGbrain) {
 if (-not (Get-Command gbrain -ErrorAction SilentlyContinue)) { Fail "gbrain is missing" }
 
 Write-Host "Checking GBrain config..."
-$ConfigFile = Join-Path $HOME ".gbrain\config.json"
+$ConfigFile = Join-Path $GbrainHome "config.json"
 $Config = Get-Content $ConfigFile -Raw | ConvertFrom-Json
 if ($Config.embedding_disabled) { Fail "embedding_disabled is still true" }
 if ($Config.embedding_model -ne "litellm:$ModelName") { Fail "wrong embedding_model: $($Config.embedding_model)" }
