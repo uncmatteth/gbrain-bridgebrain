@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.gbrain.bridgebrain.embeddings</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>@NODE_BIN@</string>
+    <string>@CODEX_HOME@/services/gbrain-chatgpt-embeddings/server.js</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>GBRAIN_CHATGPT_EMBED_HOST</key>
+    <string>127.0.0.1</string>
+    <key>GBRAIN_CHATGPT_EMBED_PORT</key>
+    <string>@PORT@</string>
+    <key>GBRAIN_CHATGPT_EMBED_PROFILE</key>
+    <string>@PROFILE@</string>
+    <key>GBRAIN_CHATGPT_EMBED_DIMENSIONS</key>
+    <string>@DIMENSIONS@</string>
+    <key>GBRAIN_CHATGPT_EMBED_MODEL</key>
+    <string>@MODEL_NAME@</string>
+    <key>BRIDGE_SCRIPT</key>
+    <string>@CODEX_HOME@/skills/unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit/scripts/gpt-web-login-bridge.js</string>
+    <key>CACHE_DIR</key>
+    <string>@CODEX_HOME@/services/gbrain-chatgpt-embeddings/cache</string>
+    <key>GPT_WEB_LOGIN_CODEX_BIN</key>
+    <string>@CODEX_BIN@</string>
+    <key>GPT_WEB_LOGIN_CWD</key>
+    <string>@HOME@</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>@CODEX_HOME@/services/gbrain-chatgpt-embeddings/bridgebrain.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>@CODEX_HOME@/services/gbrain-chatgpt-embeddings/bridgebrain.err.log</string>
+</dict>
+</plist>

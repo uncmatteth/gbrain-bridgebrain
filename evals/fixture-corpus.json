@@ -1,0 +1,26 @@
+[
+  {
+    "id": "bridge-security",
+    "text": "BridgeBrain uses the already-authenticated Codex ChatGPT login. It never reads or copies auth tokens, browser cookies, API keys, session files, or Codex auth files."
+  },
+  {
+    "id": "quality-profile",
+    "text": "The default BridgeBrain quality profile is chatgpt-bridge-semantic-hash-1536 with 1536 dimensions. The 768 dimensional model is only an explicit compatibility fallback."
+  },
+  {
+    "id": "cross-platform-install",
+    "text": "BridgeBrain ships installers for Linux systemd user services, macOS launchd LaunchAgents, and Windows user Scheduled Tasks."
+  },
+  {
+    "id": "gbrain-patch",
+    "text": "The GBrain LiteLLM compatibility patch allows user-provided LiteLLM embedding model ids from config. If the expected gateway.ts pattern changes, the patch stops and asks for inspection."
+  },
+  {
+    "id": "benchmarking",
+    "text": "BridgeBrain does not claim benchmark victory without evidence. It ships fixtures, query sets, recall, and MRR scoring so developers can benchmark it, break it, and prove it."
+  },
+  {
+    "id": "cache",
+    "text": "BridgeBrain caches structured semantic fingerprints by source text hash. It avoids storing raw source text in cache files, but derived fingerprints can still reveal sensitive meaning."
+  }
+]

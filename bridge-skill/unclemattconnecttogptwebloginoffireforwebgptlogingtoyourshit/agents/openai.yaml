@@ -1,0 +1,6 @@
+interface:
+  display_name: "UNCLEMATTCONNECTTOGPTWEBLOGINOFFIREFORWEBGPTLOGINGTOYOURSHIT"
+  short_description: "Explicit no-leak provider bridge"
+  default_prompt: "Use $unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit to connect a skill to local Codex ChatGPT login without copying credentials."
+policy:
+  allow_implicit_invocation: false

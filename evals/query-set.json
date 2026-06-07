@@ -1,0 +1,26 @@
+[
+  {
+    "query": "does bridgebrain copy chatgpt tokens or cookies",
+    "relevant": ["bridge-security"]
+  },
+  {
+    "query": "what is the default 1536 quality model",
+    "relevant": ["quality-profile"]
+  },
+  {
+    "query": "how does bridgebrain install on windows macos linux",
+    "relevant": ["cross-platform-install"]
+  },
+  {
+    "query": "what happens if gbrain gateway patch pattern changes",
+    "relevant": ["gbrain-patch"]
+  },
+  {
+    "query": "benchmark recall and mrr for bridgebrain",
+    "relevant": ["benchmarking"]
+  },
+  {
+    "query": "does the cache store raw text or derived fingerprints",
+    "relevant": ["cache"]
+  }
+]

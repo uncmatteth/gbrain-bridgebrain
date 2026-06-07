@@ -1,0 +1,21 @@
+[Unit]
+Description=GBrain BridgeBrain ChatGPT-bridge embeddings service
+After=default.target
+
+[Service]
+Type=simple
+ExecStart=@NODE_BIN@ @CODEX_HOME@/services/gbrain-chatgpt-embeddings/server.js
+Restart=on-failure
+RestartSec=5
+Environment=GBRAIN_CHATGPT_EMBED_HOST=127.0.0.1
+Environment=GBRAIN_CHATGPT_EMBED_PORT=@PORT@
+Environment=GBRAIN_CHATGPT_EMBED_PROFILE=@PROFILE@
+Environment=GBRAIN_CHATGPT_EMBED_DIMENSIONS=@DIMENSIONS@
+Environment=GBRAIN_CHATGPT_EMBED_MODEL=@MODEL_NAME@
+Environment=BRIDGE_SCRIPT=@CODEX_HOME@/skills/unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit/scripts/gpt-web-login-bridge.js
+Environment=CACHE_DIR=@CODEX_HOME@/services/gbrain-chatgpt-embeddings/cache
+Environment=GPT_WEB_LOGIN_CODEX_BIN=@CODEX_BIN@
+Environment=GPT_WEB_LOGIN_CWD=@HOME@
+
+[Install]
+WantedBy=default.target
