@@ -16,6 +16,8 @@ Do not read, copy, print, export, persist, or package:
 
 The bundled bridge calls an already-authenticated local Codex CLI. Codex owns its auth path. BridgeBrain does not inspect it.
 
+Bridge `ask` and `smoke` calls pass prompt text to `codex exec -` through stdin, not argv. The child Codex run disables shell, shell snapshot, browser, app, image, multi-agent, and web-search features so arbitrary embedding text cannot use a local command/file-reading tool path.
+
 ## Provider Data Boundary
 
 Text sent for embedding is sent through the authenticated provider account via Codex. That is the design.

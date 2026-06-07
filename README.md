@@ -147,6 +147,8 @@ The eval prints recall@K and MRR. The bundled fixture is small on purpose: it pr
 
 BridgeBrain sends text being embedded through the already-authenticated provider account via Codex. It does not make provider submission private from the provider. It does keep raw credentials out of the repo and out of the adapter.
 
+The bundled bridge passes prompt text through stdin, not command-line args, and disables the child Codex shell/browser/app/search tool surfaces before model calls.
+
 Never publish:
 
 - Codex auth material.
@@ -168,6 +170,7 @@ See `SECURITY.md` for the full boundary.
 - `scripts/verify.sh` and `scripts/verify.ps1` - install verification.
 - `scripts/patch-gbrain-litellm.js` - safe GBrain compatibility patch.
 - `scripts/test-adapter.js` - no-login adapter smoke test.
+- `scripts/test-bridge.js` - bridge stdin/no-shell-tool smoke test.
 - `scripts/eval.js` - recall/MRR eval harness.
 - `scripts/hygiene-scan.sh` - public-release hygiene scan.
 - `systemd/` and `launchd/` - user service templates.

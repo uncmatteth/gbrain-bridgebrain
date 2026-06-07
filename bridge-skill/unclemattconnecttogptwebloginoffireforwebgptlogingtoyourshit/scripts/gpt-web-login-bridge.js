@@ -24,10 +24,11 @@ function requirePrompt(args) {
   return prompt;
 }
 
-function runCodex(args) {
+function runCodex(args, stdin = undefined) {
   return spawnSync(codexBin, args, {
     cwd: bridgeCwd,
     encoding: 'utf8',
+    input: stdin,
     maxBuffer: 64 * 1024 * 1024,
     env: {
       ...process.env,
@@ -100,6 +101,22 @@ function codexAsk(prompt) {
     '--skip-git-repo-check',
     '--ephemeral',
     '--json',
+    '--disable',
+    'apps',
+    '--disable',
+    'browser_use',
+    '--disable',
+    'browser_use_external',
+    '--disable',
+    'computer_use',
+    '--disable',
+    'image_generation',
+    '--disable',
+    'multi_agent',
+    '--disable',
+    'shell_snapshot',
+    '--disable',
+    'shell_tool',
     '-C',
     bridgeCwd,
     '-s',
@@ -107,9 +124,11 @@ function codexAsk(prompt) {
     '-c',
     'approval_policy="never"',
     '-c',
+    'web_search="disabled"',
+    '-c',
     'model_reasoning_effort="low"',
-    prompt,
-  ]);
+    '-',
+  ], prompt);
 
   const text = parseAgentText(result.stdout || '');
   if (result.status !== 0 || !text) {
@@ -148,6 +167,7 @@ Usage:
 
 The bridge uses an already-authenticated local CLI. It does not read or print raw credentials.
 ask and smoke send prompt text to the authenticated provider account. Do not send secrets unless that provider exposure is intentional.
+ask and smoke pass prompt text through stdin and disable shell/browser/app/search tools for the child model run.
 `);
 }
 

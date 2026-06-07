@@ -20,6 +20,7 @@ I am the new and exciting bridge uncle that lets an agent use the local Codex Ch
 - Keeps raw auth tokens, browser cookies, API keys, and local auth files the hell out of the package.
 - Narrows invocation to explicit bridge/setup requests so ordinary ask/recall/distill/helper work does not accidentally route through this skill.
 - Makes the provider data boundary explicit: `ask` and `smoke` send prompt text through the authenticated provider.
+- Sends prompt text through stdin and disables child Codex shell/browser/app/search tool surfaces.
 - Keeps `status` output boring on purpose. It reports bridge availability without printing auth mode, token presence, API-key presence, or machine paths.
 - Gives other skills a clean pattern for using ChatGPT-web-login-backed model calls without pretending an API key exists.
 
@@ -43,6 +44,8 @@ This is not an offline local model. `ask` and `smoke` send their prompt text thr
 
 Do not send passwords, API keys, browser cookies, private documents, regulated personal data, or other sensitive material unless the user explicitly accepts that provider exposure. This skill keeps credentials out of the agent's hands; it does not magically make submitted prompts private from the provider.
 
+The bridge passes prompt text through stdin, not command-line arguments. For child model calls it disables shell, shell snapshot, browser, app, image, multi-agent, and web-search features so arbitrary prompt text cannot use a local command/file-reading tool path.
+
 ## Quick Start
 
 Use the bundled bridge script:
@@ -56,10 +59,10 @@ node scripts/gpt-web-login-bridge.js ask "Return exactly OK."
 Default provider is Codex CLI. The script uses:
 
 ```bash
-codex exec --ignore-user-config --ignore-rules --skip-git-repo-check --ephemeral --json
+codex exec --ignore-user-config --ignore-rules --skip-git-repo-check --ephemeral --json -
 ```
 
-This uses Codex auth while avoiding recursive user config, hooks, and persistent session files for the bridge call. It is the clean route: let Codex be logged in, let the bridge call Codex, keep the agent’s grubby little hands away from secrets.
+This uses Codex auth while avoiding recursive user config, hooks, persistent session files, prompt argv leakage, and local shell/browser/app/search tools for the bridge call. It is the clean route: let Codex be logged in, let the bridge call Codex, keep the agent's grubby little hands away from secrets.
 
 Before running `ask` or `smoke`, confirm the prompt is safe to send to the authenticated provider. If the prompt contains secrets or private material, stop instead of forwarding it.
 
@@ -74,7 +77,7 @@ Before running `ask` or `smoke`, confirm the prompt is safe to send to the authe
 
 - `status`: report only whether the local provider is available. It must not print auth mode, token presence, API-key presence, raw paths, or secrets.
 - `smoke`: send a fixed harmless prompt through the authenticated local provider to prove the bridge can get a model response.
-- `ask "prompt"`: send the supplied prompt through the authenticated local provider. This transmits prompt content to that provider account.
+- `ask "prompt"`: send the supplied prompt through the authenticated local provider using stdin internally. This transmits prompt content to that provider account.
 
 The script also accepts prompt text on stdin:
 
