@@ -14,6 +14,7 @@ const MAX_TEXT_CHARS = Number(process.env.MAX_TEXT_CHARS || 6000);
 const BRIDGE_TIMEOUT_MS = Number(process.env.BRIDGE_TIMEOUT_MS || 300000);
 const CODEX_BIN = process.env.GPT_WEB_LOGIN_CODEX_BIN || 'codex';
 const SUPPORTED_DIMENSIONS = new Set([768, 1536]);
+const API_TOKEN = process.env.BRIDGEBRAIN_API_TOKEN || process.env.GBRAIN_CHATGPT_EMBED_TOKEN || '';
 const SKILL_NAME = 'unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit';
 const BRIDGE_SCRIPT =
   process.env.BRIDGE_SCRIPT ||
@@ -49,6 +50,8 @@ const MODEL_NAME =
   process.env.GBRAIN_CHATGPT_EMBED_MODEL ||
   process.env.MODEL_NAME ||
   `chatgpt-bridge-semantic-hash-${DEFAULT_DIMENSIONS}`;
+const ALLOW_UNAUTHENTICATED =
+  PROFILE === 'mock' || process.env.BRIDGEBRAIN_ALLOW_UNAUTHENTICATED === '1';
 
 const stats = {
   started_at: new Date().toISOString(),
@@ -61,7 +64,53 @@ const stats = {
   cache_writes: 0,
 };
 
-fs.mkdirSync(CACHE_DIR, { recursive: true });
+function chmodMaybe(target, mode) {
+  try {
+    fs.chmodSync(target, mode);
+  } catch {
+    // chmod is best-effort on some filesystems.
+  }
+}
+
+function ensurePrivateDir(dir) {
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  chmodMaybe(dir, 0o700);
+}
+
+function hardenCacheTree(dir) {
+  ensurePrivateDir(dir);
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      chmodMaybe(full, 0o700);
+      let children = [];
+      try {
+        children = fs.readdirSync(full, { withFileTypes: true });
+      } catch {
+        continue;
+      }
+      for (const child of children) {
+        const childPath = path.join(full, child.name);
+        if (child.isDirectory()) chmodMaybe(childPath, 0o700);
+        else chmodMaybe(childPath, 0o600);
+      }
+    } else {
+      chmodMaybe(full, 0o600);
+    }
+  }
+}
+
+if (!ALLOW_UNAUTHENTICATED && !API_TOKEN) {
+  throw new Error('BRIDGEBRAIN_API_TOKEN is required unless BRIDGEBRAIN_ALLOW_UNAUTHENTICATED=1');
+}
+
+hardenCacheTree(CACHE_DIR);
 
 function sha256(input) {
   return crypto.createHash('sha256').update(input).digest();
@@ -101,7 +150,7 @@ function readCache(text) {
 
 function writeCache(text, signature) {
   const file = cacheFileFor(text);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
+  ensurePrivateDir(path.dirname(file));
   const payload = {
     schema_version: CACHE_SCHEMA_VERSION,
     created_at: new Date().toISOString(),
@@ -110,8 +159,10 @@ function writeCache(text, signature) {
     signature,
   };
   const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(payload, null, 2));
+  fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), { mode: 0o600 });
+  chmodMaybe(tmp, 0o600);
   fs.renameSync(tmp, file);
+  chmodMaybe(file, 0o600);
   stats.cache_writes += 1;
 }
 
@@ -143,14 +194,53 @@ function isTrustedOrigin(origin) {
   }
 }
 
-function assertTrustedEmbeddingRequest(req) {
+function constantTimeEquals(a, b) {
+  const left = Buffer.from(String(a || ''), 'utf8');
+  const right = Buffer.from(String(b || ''), 'utf8');
+  if (left.length !== right.length) return false;
+  return crypto.timingSafeEqual(left, right);
+}
+
+function bearerToken(req) {
+  const header = String(req.headers.authorization || '');
+  const match = header.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : '';
+}
+
+function assertAuthorizedEmbeddingRequest(req, pathToken) {
+  if (ALLOW_UNAUTHENTICATED && !API_TOKEN) return;
+  const supplied = pathToken || bearerToken(req);
+  if (!API_TOKEN || !constantTimeEquals(supplied, API_TOKEN)) {
+    throw requestError(401, 'unauthorized', 'valid BridgeBrain bearer token is required');
+  }
+}
+
+function assertTrustedEmbeddingRequest(req, pathToken) {
   const contentType = String(req.headers['content-type'] || '').toLowerCase();
   if (!contentType.startsWith('application/json')) {
     throw requestError(415, 'unsupported_media_type', 'content-type must be application/json');
   }
+  assertAuthorizedEmbeddingRequest(req, pathToken);
   if (!isTrustedOrigin(req.headers.origin)) {
     throw requestError(403, 'forbidden_origin', 'origin is not allowed');
   }
+}
+
+function routeFromUrl(url) {
+  const parts = url.pathname.split('/').filter(Boolean);
+  if (parts[0] === 'v1' && parts[1] === 't' && parts[2]) {
+    return {
+      pathname: `/${['v1', ...parts.slice(3)].join('/')}`,
+      token: decodeURIComponent(parts[2]),
+    };
+  }
+  if (parts[0] === 't' && parts[1]) {
+    return {
+      pathname: `/${parts.slice(2).join('/')}`,
+      token: decodeURIComponent(parts[1]),
+    };
+  }
+  return { pathname: url.pathname, token: '' };
 }
 
 function extractJsonObject(text) {
@@ -507,9 +597,10 @@ function modelList() {
 
 async function handle(req, res) {
   const url = new URL(req.url, `http://${req.headers.host || `${HOST}:${PORT}`}`);
+  const route = routeFromUrl(url);
   stats.requests += 1;
 
-  if (req.method === 'GET' && (url.pathname === '/health' || url.pathname === '/v1/health')) {
+  if (req.method === 'GET' && (route.pathname === '/health' || route.pathname === '/v1/health')) {
     sendJson(res, 200, {
       ok: true,
       profile: PROFILE,
@@ -524,12 +615,12 @@ async function handle(req, res) {
     return;
   }
 
-  if (req.method === 'GET' && (url.pathname === '/stats' || url.pathname === '/v1/stats')) {
+  if (req.method === 'GET' && (route.pathname === '/stats' || route.pathname === '/v1/stats')) {
     sendJson(res, 200, stats);
     return;
   }
 
-  if (req.method === 'GET' && (url.pathname === '/models' || url.pathname === '/v1/models')) {
+  if (req.method === 'GET' && (route.pathname === '/models' || route.pathname === '/v1/models')) {
     sendJson(res, 200, {
       object: 'list',
       data: modelList(),
@@ -537,9 +628,9 @@ async function handle(req, res) {
     return;
   }
 
-  if (req.method === 'POST' && (url.pathname === '/embeddings' || url.pathname === '/v1/embeddings')) {
+  if (req.method === 'POST' && (route.pathname === '/embeddings' || route.pathname === '/v1/embeddings')) {
     try {
-      assertTrustedEmbeddingRequest(req);
+      assertTrustedEmbeddingRequest(req, route.token);
       const request = await readJson(req);
       const inputs = embeddingInputsFromRequest(request.input);
       const normalizedInputs = inputs.map(normalizeText);

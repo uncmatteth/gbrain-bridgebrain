@@ -12,6 +12,7 @@ Environment=GBRAIN_CHATGPT_EMBED_PORT=@PORT@
 Environment=GBRAIN_CHATGPT_EMBED_PROFILE=@PROFILE@
 Environment=GBRAIN_CHATGPT_EMBED_DIMENSIONS=@DIMENSIONS@
 Environment=GBRAIN_CHATGPT_EMBED_MODEL=@MODEL_NAME@
+Environment=BRIDGEBRAIN_API_TOKEN=@API_TOKEN@
 Environment=BRIDGE_SCRIPT=@CODEX_HOME@/skills/unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit/scripts/gpt-web-login-bridge.js
 Environment=CACHE_DIR=@CODEX_HOME@/services/gbrain-chatgpt-embeddings/cache
 Environment=GPT_WEB_LOGIN_CODEX_BIN=@CODEX_BIN@

@@ -47,7 +47,9 @@ home="\${GBRAIN_HOME:-$HOME/.gbrain}"
 case "\${1:-}" in
   init)
     mkdir -p "$home"
-    printf '{}\\n' > "$home/config.json"
+    if [[ ! -f "$home/config.json" ]]; then
+      printf '{}\\n' > "$home/config.json"
+    fi
     ;;
   call)
     if [[ "\${2:-}" == "get_brain_identity" ]]; then
@@ -84,6 +86,7 @@ esac
     GBRAIN_GATEWAY_TS: gateway,
     NODE_BIN: process.execPath,
     GBRAIN_CHATGPT_EMBED_PORT: '59998',
+    BRIDGEBRAIN_API_TOKEN: 'install-smoke-token',
     PATH: `${bin}${path.delimiter}${process.env.PATH || ''}`,
   };
 
@@ -106,7 +109,7 @@ esac
   if (config.embedding_model !== 'litellm:chatgpt-bridge-semantic-hash-1536') {
     fail(`unexpected embedding model: ${config.embedding_model}`);
   }
-  if (!config.provider_base_urls || config.provider_base_urls.litellm !== 'http://127.0.0.1:59998/v1') {
+  if (!config.provider_base_urls || config.provider_base_urls.litellm !== 'http://127.0.0.1:59998/v1/t/install-smoke-token') {
     fail(`unexpected litellm base URL: ${JSON.stringify(config.provider_base_urls)}`);
   }
 

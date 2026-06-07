@@ -15,7 +15,7 @@ PORT="${GBRAIN_CHATGPT_EMBED_PORT:-4127}"
 PROFILE="${BRIDGEBRAIN_PROFILE:-${GBRAIN_CHATGPT_EMBED_PROFILE:-quality}}"
 MODEL_NAME="${GBRAIN_CHATGPT_EMBED_MODEL:-chatgpt-bridge-semantic-hash-1536}"
 DIMENSIONS="${GBRAIN_CHATGPT_EMBED_DIMENSIONS:-1536}"
-BASE_URL="http://127.0.0.1:${PORT}/v1"
+TOKEN="${BRIDGEBRAIN_API_TOKEN:-${GBRAIN_CHATGPT_EMBED_TOKEN:-}}"
 INSTALL_GBRAIN=0
 SKIP_SERVICE=0
 SKIP_VERIFY=0
@@ -31,7 +31,7 @@ Defaults:
   profile: quality
   model: chatgpt-bridge-semantic-hash-1536
   dimensions: 1536
-  url: http://127.0.0.1:4127/v1
+  url: http://127.0.0.1:4127/v1/t/<generated-token>
 
 Compatibility mode:
   BRIDGEBRAIN_PROFILE=compat GBRAIN_CHATGPT_EMBED_DIMENSIONS=768 \
@@ -82,6 +82,11 @@ fi
 need_cmd node "$NODE_BIN"
 need_cmd codex "$CODEX_BIN"
 
+if [[ -z "$TOKEN" ]]; then
+  TOKEN="$("$NODE_BIN" -e "console.log(require('crypto').randomBytes(32).toString('hex'))")"
+fi
+BASE_URL="http://127.0.0.1:${PORT}/v1/t/${TOKEN}"
+
 if [[ -z "$GBRAIN_BIN" ]]; then
   if [[ "$INSTALL_GBRAIN" -ne 1 ]]; then
     fail "gbrain is missing. Install it first, or rerun with --install-gbrain."
@@ -107,11 +112,16 @@ GPT_WEB_LOGIN_CODEX_BIN="$CODEX_BIN" GPT_WEB_LOGIN_CWD="$HOME" \
 "$NODE_BIN" "$ROOT/scripts/patch-gbrain-litellm.js"
 
 mkdir -p "$GBRAIN_HOME"
-if [[ ! -f "$GBRAIN_HOME/config.json" ]]; then
-  "$GBRAIN_BIN" init --pglite --no-embedding
+CONFIG_FILE="$GBRAIN_HOME/config.json"
+CONFIG_EXISTED=0
+if [[ -f "$CONFIG_FILE" ]]; then
+  CONFIG_EXISTED=1
 fi
-
-"$NODE_BIN" "$ROOT/scripts/configure-gbrain.js" "$GBRAIN_HOME/config.json" "$MODEL_NAME" "$DIMENSIONS" "$BASE_URL"
+"$NODE_BIN" "$ROOT/scripts/configure-gbrain.js" "$CONFIG_FILE" "$MODEL_NAME" "$DIMENSIONS" "$BASE_URL"
+if [[ "$CONFIG_EXISTED" -ne 1 ]]; then
+  "$GBRAIN_BIN" init --pglite --no-embedding
+  "$NODE_BIN" "$ROOT/scripts/configure-gbrain.js" "$CONFIG_FILE" "$MODEL_NAME" "$DIMENSIONS" "$BASE_URL"
+fi
 
 pages="unknown"
 identity_file="$(mktemp)"
@@ -135,6 +145,7 @@ if [[ "$SKIP_SERVICE" -ne 1 ]]; then
   PROFILE_ESC="$(sed_escape "$PROFILE")"
   MODEL_NAME_ESC="$(sed_escape "$MODEL_NAME")"
   DIMENSIONS_ESC="$(sed_escape "$DIMENSIONS")"
+  TOKEN_ESC="$(sed_escape "$TOKEN")"
   if [[ "$OS_NAME" == "Linux" ]]; then
     USER_SYSTEMD_DIR="$HOME/.config/systemd/user"
     UNIT_NAME="gbrain-chatgpt-embeddings.service"
@@ -148,7 +159,9 @@ if [[ "$SKIP_SERVICE" -ne 1 ]]; then
       -e "s|@PROFILE@|$PROFILE_ESC|g" \
       -e "s|@MODEL_NAME@|$MODEL_NAME_ESC|g" \
       -e "s|@DIMENSIONS@|$DIMENSIONS_ESC|g" \
+      -e "s|@API_TOKEN@|$TOKEN_ESC|g" \
       "$ROOT/systemd/gbrain-chatgpt-embeddings.service.template" > "$USER_SYSTEMD_DIR/$UNIT_NAME"
+    chmod 600 "$USER_SYSTEMD_DIR/$UNIT_NAME"
     systemctl --user daemon-reload
     systemctl --user enable --now "$UNIT_NAME"
     systemctl --user restart "$UNIT_NAME"
@@ -165,7 +178,9 @@ if [[ "$SKIP_SERVICE" -ne 1 ]]; then
       -e "s|@PROFILE@|$PROFILE_ESC|g" \
       -e "s|@MODEL_NAME@|$MODEL_NAME_ESC|g" \
       -e "s|@DIMENSIONS@|$DIMENSIONS_ESC|g" \
+      -e "s|@API_TOKEN@|$TOKEN_ESC|g" \
       "$ROOT/launchd/com.gbrain.bridgebrain.embeddings.plist.template" > "$PLIST"
+    chmod 600 "$PLIST"
     launchctl unload "$PLIST" >/dev/null 2>&1 || true
     launchctl load "$PLIST"
     launchctl start com.gbrain.bridgebrain.embeddings || true
@@ -186,4 +201,4 @@ fi
 echo "BridgeBrain installed."
 echo "Model: litellm:${MODEL_NAME}"
 echo "Dimensions: ${DIMENSIONS}"
-echo "Endpoint: ${BASE_URL}"
+echo "Endpoint: http://127.0.0.1:${PORT}/v1/t/<redacted>"

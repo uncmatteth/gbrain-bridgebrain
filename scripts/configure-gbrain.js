@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
+const path = require('path');
 
 const [file, model, dimsRaw, baseUrl] = process.argv.slice(2);
 
@@ -20,4 +21,15 @@ delete cfg.embedding_disabled;
 cfg.embedding_model = `litellm:${model}`;
 cfg.embedding_dimensions = dimensions;
 cfg.provider_base_urls = { ...(cfg.provider_base_urls || {}), litellm: baseUrl };
-fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n');
+fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+try {
+  fs.chmodSync(path.dirname(file), 0o700);
+} catch {
+  // chmod may fail on some filesystems.
+}
+fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 });
+try {
+  fs.chmodSync(file, 0o600);
+} catch {
+  // chmod may fail on some filesystems.
+}

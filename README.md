@@ -72,6 +72,8 @@ cd gbrain-bridgebrain
 
 The installer copies the bundled bridge skill into the current user's Codex home, installs the adapter service, patches GBrain's LiteLLM model-id check, configures GBrain, and runs verification.
 
+It also generates a per-install local token. GBrain's LiteLLM base URL is written as `http://127.0.0.1:<port>/v1/t/<generated-token>`, and the service receives the matching `BRIDGEBRAIN_API_TOKEN`. Do not publish that local config or service file.
+
 If you use a non-default GBrain home, set `GBRAIN_HOME` before installing and verifying.
 
 If GBrain already has pages, the installer does not wipe the brain. It updates provider config and reports that a supported migration or reindex is needed if existing embeddings use another width.
@@ -148,6 +150,8 @@ The eval prints recall@K and MRR. The bundled fixture is small on purpose: it pr
 BridgeBrain sends text being embedded through the already-authenticated provider account via Codex. It does not make provider submission private from the provider. It does keep raw credentials out of the repo and out of the adapter.
 
 The bundled bridge passes prompt text through stdin, not command-line args, and disables the child Codex shell/browser/app/search tool surfaces before model calls.
+
+Embedding POSTs require the per-install local token, either in the tokenized `/v1/t/<token>/...` path written by the installer or as `Authorization: Bearer <token>`.
 
 Never publish:
 

@@ -13,6 +13,7 @@ $Port = if ($env:GBRAIN_CHATGPT_EMBED_PORT) { $env:GBRAIN_CHATGPT_EMBED_PORT } e
 $Profile = if ($env:BRIDGEBRAIN_PROFILE) { $env:BRIDGEBRAIN_PROFILE } elseif ($env:GBRAIN_CHATGPT_EMBED_PROFILE) { $env:GBRAIN_CHATGPT_EMBED_PROFILE } else { "quality" }
 $ModelName = if ($env:GBRAIN_CHATGPT_EMBED_MODEL) { $env:GBRAIN_CHATGPT_EMBED_MODEL } else { "chatgpt-bridge-semantic-hash-1536" }
 $Dimensions = if ($env:GBRAIN_CHATGPT_EMBED_DIMENSIONS) { $env:GBRAIN_CHATGPT_EMBED_DIMENSIONS } else { "1536" }
+$Token = if ($env:BRIDGEBRAIN_API_TOKEN) { $env:BRIDGEBRAIN_API_TOKEN } elseif ($env:GBRAIN_CHATGPT_EMBED_TOKEN) { $env:GBRAIN_CHATGPT_EMBED_TOKEN } else { "" }
 $BaseUrl = "http://127.0.0.1:$Port/v1"
 
 if ($Profile -eq "compat") {
@@ -26,6 +27,16 @@ function Fail($Message) {
 }
 
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Fail "node is missing" }
+
+$ConfigFile = Join-Path $GbrainHome "config.json"
+if (Test-Path $ConfigFile) {
+  $ConfigForBaseUrl = Get-Content $ConfigFile -Raw | ConvertFrom-Json
+  if ($ConfigForBaseUrl.provider_base_urls.litellm) {
+    $BaseUrl = $ConfigForBaseUrl.provider_base_urls.litellm
+  }
+} elseif ($Token) {
+  $BaseUrl = "http://127.0.0.1:$Port/v1/t/$Token"
+}
 
 if ($Profile -ne "mock" -and -not $SkipBridge) {
   if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { Fail "codex is missing" }
@@ -62,7 +73,6 @@ if ($SkipGbrain) {
 if (-not (Get-Command gbrain -ErrorAction SilentlyContinue)) { Fail "gbrain is missing" }
 
 Write-Host "Checking GBrain config..."
-$ConfigFile = Join-Path $GbrainHome "config.json"
 $Config = Get-Content $ConfigFile -Raw | ConvertFrom-Json
 if ($Config.embedding_disabled) { Fail "embedding_disabled is still true" }
 if ($Config.embedding_model -ne "litellm:$ModelName") { Fail "wrong embedding_model: $($Config.embedding_model)" }

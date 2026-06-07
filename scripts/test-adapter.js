@@ -10,6 +10,8 @@ const root = path.resolve(__dirname, '..');
 const serverPath = path.join(root, 'src', 'gbrain-chatgpt-embeddings-server.js');
 const port = Number(process.env.BRIDGEBRAIN_TEST_PORT || 4137);
 const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bridgebrain-cache-'));
+const apiToken = 'bridgebrain-test-token';
+const embeddingsPath = `/v1/t/${apiToken}/embeddings`;
 
 function request(method, pathname, body, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
@@ -67,6 +69,22 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
+function assertMode(file, expected, label) {
+  const actual = fs.statSync(file).mode & 0o777;
+  assert(actual === expected, `${label} mode ${actual.toString(8)} !== ${expected.toString(8)}`);
+}
+
+function firstCacheFile(dir) {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const childDir = path.join(dir, entry.name);
+    for (const child of fs.readdirSync(childDir, { withFileTypes: true })) {
+      if (child.isFile() && child.name.endsWith('.json')) return path.join(childDir, child.name);
+    }
+  }
+  return '';
+}
+
 async function assertInvalidStartupDimensions() {
   const child = spawn(process.execPath, [serverPath], {
     cwd: root,
@@ -109,6 +127,7 @@ async function main() {
       GBRAIN_CHATGPT_EMBED_PROFILE: 'mock',
       GBRAIN_CHATGPT_EMBED_MODEL: 'chatgpt-bridge-semantic-hash-1536',
       GBRAIN_CHATGPT_EMBED_DIMENSIONS: '1536',
+      BRIDGEBRAIN_API_TOKEN: apiToken,
       CACHE_DIR: cacheDir,
     },
   });
@@ -128,14 +147,31 @@ async function main() {
     assert(models.json.data.some((model) => model.id === 'chatgpt-bridge-semantic-hash-1536'), '1536 model missing');
     assert(models.json.data.some((model) => model.id === 'chatgpt-bridge-semantic-hash-768'), '768 model missing');
 
-    const first = await request('POST', '/v1/embeddings', {
+    const unauthenticated = await request('POST', '/v1/embeddings', {
+      model: 'chatgpt-bridge-semantic-hash-1536',
+      input: ['BridgeBrain unauthenticated request test'],
+    });
+    assert(unauthenticated.status === 401, `unauthenticated embedding status ${unauthenticated.status}`);
+
+    const wrongToken = await request('POST', '/v1/t/wrong-token/embeddings', {
+      model: 'chatgpt-bridge-semantic-hash-1536',
+      input: ['BridgeBrain wrong token request test'],
+    });
+    assert(wrongToken.status === 401, `wrong token embedding status ${wrongToken.status}`);
+
+    const first = await request('POST', embeddingsPath, {
       model: 'chatgpt-bridge-semantic-hash-1536',
       input: ['BridgeBrain adapter smoke test with semantic retrieval'],
     });
     assert(first.status === 200, `first embedding status ${first.status}`);
     assert(first.json.data[0].embedding.length === 1536, `expected 1536 dims, got ${first.json.data[0].embedding.length}`);
+    assertMode(cacheDir, 0o700, 'cache dir');
+    const cacheFile = firstCacheFile(cacheDir);
+    assert(cacheFile, 'cache file missing');
+    assertMode(path.dirname(cacheFile), 0o700, 'cache shard dir');
+    assertMode(cacheFile, 0o600, 'cache file');
 
-    const single = await request('POST', '/v1/embeddings', {
+    const single = await request('POST', embeddingsPath, {
       model: 'chatgpt-bridge-semantic-hash-1536',
       input: 'BridgeBrain single string input',
     });
@@ -144,7 +180,7 @@ async function main() {
 
     const wrongContentType = await request(
       'POST',
-      '/v1/embeddings',
+      embeddingsPath,
       {
         model: 'chatgpt-bridge-semantic-hash-1536',
         input: 'BridgeBrain wrong content type test',
@@ -155,7 +191,7 @@ async function main() {
 
     const badOrigin = await request(
       'POST',
-      '/v1/embeddings',
+      embeddingsPath,
       {
         model: 'chatgpt-bridge-semantic-hash-1536',
         input: 'BridgeBrain bad origin test',
@@ -164,7 +200,7 @@ async function main() {
     );
     assert(badOrigin.status === 403, `bad origin status ${badOrigin.status}`);
 
-    const explicitDefault = await request('POST', '/v1/embeddings', {
+    const explicitDefault = await request('POST', embeddingsPath, {
       model: 'chatgpt-bridge-semantic-hash-1536',
       input: 'BridgeBrain explicit default dimensions',
       dimensions: 1536,
@@ -175,19 +211,19 @@ async function main() {
       `expected 1536 dims, got ${explicitDefault.json.data[0].embedding.length}`,
     );
 
-    const tokenArray = await request('POST', '/v1/embeddings', {
+    const tokenArray = await request('POST', embeddingsPath, {
       model: 'chatgpt-bridge-semantic-hash-1536',
       input: [1, 2, 3],
     });
     assert(tokenArray.status === 400, `token array embedding status ${tokenArray.status}`);
 
-    const tokenArrayBatch = await request('POST', '/v1/embeddings', {
+    const tokenArrayBatch = await request('POST', embeddingsPath, {
       model: 'chatgpt-bridge-semantic-hash-1536',
       input: [[1, 2, 3]],
     });
     assert(tokenArrayBatch.status === 400, `token array batch embedding status ${tokenArrayBatch.status}`);
 
-    const compat = await request('POST', '/v1/embeddings', {
+    const compat = await request('POST', embeddingsPath, {
       model: 'chatgpt-bridge-semantic-hash-768',
       input: ['BridgeBrain adapter compatibility smoke test'],
       dimensions: 768,
@@ -196,7 +232,7 @@ async function main() {
     assert(compat.json.data[0].embedding.length === 768, `expected 768 dims, got ${compat.json.data[0].embedding.length}`);
 
     for (const dimensions of [1024, 4096, 0, -1, 'NaN', 100_000_000]) {
-      const invalidDimensions = await request('POST', '/v1/embeddings', {
+      const invalidDimensions = await request('POST', embeddingsPath, {
         model: 'chatgpt-bridge-semantic-hash-1536',
         input: ['BridgeBrain rejected dimensions smoke test'],
         dimensions,
@@ -208,7 +244,7 @@ async function main() {
     }
 
     const beforeStats = await request('GET', '/stats');
-    const repeat = await request('POST', '/v1/embeddings', {
+    const repeat = await request('POST', embeddingsPath, {
       model: 'chatgpt-bridge-semantic-hash-1536',
       input: ['BridgeBrain adapter smoke test with semantic retrieval'],
     });

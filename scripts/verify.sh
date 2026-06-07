@@ -9,6 +9,7 @@ PORT="${GBRAIN_CHATGPT_EMBED_PORT:-4127}"
 PROFILE="${BRIDGEBRAIN_PROFILE:-${GBRAIN_CHATGPT_EMBED_PROFILE:-quality}}"
 MODEL_NAME="${GBRAIN_CHATGPT_EMBED_MODEL:-chatgpt-bridge-semantic-hash-1536}"
 DIMENSIONS="${GBRAIN_CHATGPT_EMBED_DIMENSIONS:-1536}"
+TOKEN="${BRIDGEBRAIN_API_TOKEN:-${GBRAIN_CHATGPT_EMBED_TOKEN:-}}"
 BASE_URL="http://127.0.0.1:${PORT}/v1"
 SKIP_GBRAIN=0
 SKIP_BRIDGE=0
@@ -49,6 +50,24 @@ fi
 
 command -v node >/dev/null 2>&1 || fail "node is missing"
 command -v curl >/dev/null 2>&1 || fail "curl is missing"
+
+CONFIG_BASE_URL="$(
+  node - "$GBRAIN_HOME/config.json" <<'NODE'
+const fs = require('fs');
+const file = process.argv[2];
+try {
+  const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
+  process.stdout.write(cfg.provider_base_urls?.litellm || '');
+} catch {
+  process.stdout.write('');
+}
+NODE
+)"
+if [[ -n "$CONFIG_BASE_URL" ]]; then
+  BASE_URL="$CONFIG_BASE_URL"
+elif [[ -n "$TOKEN" ]]; then
+  BASE_URL="http://127.0.0.1:${PORT}/v1/t/${TOKEN}"
+fi
 
 if [[ "$PROFILE" != "mock" && "$SKIP_BRIDGE" -ne 1 ]]; then
   command -v codex >/dev/null 2>&1 || fail "codex is missing"

@@ -31,7 +31,7 @@ GBrain embeddings through your own Codex ChatGPT web-login bridge. No Ollama, no
   "embedding_model": "litellm:chatgpt-bridge-semantic-hash-1536",
   "embedding_dimensions": 1536,
   "provider_base_urls": {
-    "litellm": "http://127.0.0.1:4127/v1"
+    "litellm": "http://127.0.0.1:4127/v1/t/<generated-token>"
   }
 }
 ```
@@ -100,7 +100,7 @@ Expected adapter proof:
 
 - `/health` returns `ok: true`.
 - `/v1/models` lists `chatgpt-bridge-semantic-hash-1536` and `chatgpt-bridge-semantic-hash-768`.
-- `/v1/embeddings` returns exactly 1536 numbers by default.
+- `/v1/t/<generated-token>/embeddings` returns exactly 1536 numbers by default.
 - Explicit compatibility request returns exactly 768 numbers.
 - Mock mode works without login.
 - Cache repeat avoids a bridge call.
@@ -140,7 +140,7 @@ Review broad hits. Blockers:
 - Real local home paths.
 - Real names from the operator machine.
 - Raw credential file names.
-- Auth, cookie, token, session, key, GBrain DB, Codex private material, cache artifacts.
+- Auth, cookie, real token values, session, key, GBrain DB, Codex private material, cache artifacts.
 - Stale 768-default language.
 - Old benchmark-dodge language.
 - Any instruction that tells users to use Ollama.

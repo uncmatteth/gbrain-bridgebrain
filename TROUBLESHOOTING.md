@@ -40,6 +40,12 @@ curl -fsS http://127.0.0.1:4127/health
 curl -fsS http://127.0.0.1:4127/v1/models
 ```
 
+Embedding calls require the generated local token. The installer stores the tokenized base URL in `provider_base_urls.litellm`:
+
+```bash
+node -e 'const fs=require("fs"); const f=`${process.env.GBRAIN_HOME||process.env.HOME+"/.gbrain"}/config.json`; console.log(JSON.parse(fs.readFileSync(f,"utf8")).provider_base_urls.litellm)'
+```
+
 Expected default model:
 
 ```text

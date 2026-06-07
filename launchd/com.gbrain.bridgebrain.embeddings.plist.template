@@ -29,6 +29,8 @@
     <string>@DIMENSIONS@</string>
     <key>GBRAIN_CHATGPT_EMBED_MODEL</key>
     <string>@MODEL_NAME@</string>
+    <key>BRIDGEBRAIN_API_TOKEN</key>
+    <string>@API_TOKEN@</string>
     <key>BRIDGE_SCRIPT</key>
     <string>@CODEX_HOME@/skills/unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit/scripts/gpt-web-login-bridge.js</string>
     <key>CACHE_DIR</key>

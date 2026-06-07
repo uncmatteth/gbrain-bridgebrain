@@ -6,6 +6,17 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function New-BridgeBrainToken {
+  $Bytes = New-Object byte[] 32
+  $Rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+  try {
+    $Rng.GetBytes($Bytes)
+  } finally {
+    $Rng.Dispose()
+  }
+  return -join ($Bytes | ForEach-Object { $_.ToString("x2") })
+}
+
 $Root = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME ".codex" }
 $ServiceHome = Join-Path $CodexHome "services\gbrain-chatgpt-embeddings"
@@ -18,7 +29,8 @@ $Port = if ($env:GBRAIN_CHATGPT_EMBED_PORT) { $env:GBRAIN_CHATGPT_EMBED_PORT } e
 $Profile = if ($env:BRIDGEBRAIN_PROFILE) { $env:BRIDGEBRAIN_PROFILE } elseif ($env:GBRAIN_CHATGPT_EMBED_PROFILE) { $env:GBRAIN_CHATGPT_EMBED_PROFILE } else { "quality" }
 $ModelName = if ($env:GBRAIN_CHATGPT_EMBED_MODEL) { $env:GBRAIN_CHATGPT_EMBED_MODEL } else { "chatgpt-bridge-semantic-hash-1536" }
 $Dimensions = if ($env:GBRAIN_CHATGPT_EMBED_DIMENSIONS) { $env:GBRAIN_CHATGPT_EMBED_DIMENSIONS } else { "1536" }
-$BaseUrl = "http://127.0.0.1:$Port/v1"
+$Token = if ($env:BRIDGEBRAIN_API_TOKEN) { $env:BRIDGEBRAIN_API_TOKEN } elseif ($env:GBRAIN_CHATGPT_EMBED_TOKEN) { $env:GBRAIN_CHATGPT_EMBED_TOKEN } else { New-BridgeBrainToken }
+$BaseUrl = "http://127.0.0.1:$Port/v1/t/$Token"
 
 if ($Profile -eq "compat") {
   if (-not $env:GBRAIN_CHATGPT_EMBED_MODEL) { $ModelName = "chatgpt-bridge-semantic-hash-768" }
@@ -58,11 +70,12 @@ $env:GPT_WEB_LOGIN_CWD = $HOME
 $GbrainHome = if ($env:GBRAIN_HOME) { $env:GBRAIN_HOME } else { Join-Path $HOME ".gbrain" }
 $ConfigFile = Join-Path $GbrainHome "config.json"
 New-Item -ItemType Directory -Force -Path $GbrainHome | Out-Null
-if (-not (Test-Path $ConfigFile)) {
-  & $GbrainBin init --pglite --no-embedding
-}
-
+$ConfigExisted = Test-Path $ConfigFile
 & $NodeBin (Join-Path $Root "scripts\configure-gbrain.js") $ConfigFile $ModelName $Dimensions $BaseUrl
+if (-not $ConfigExisted) {
+  & $GbrainBin init --pglite --no-embedding
+  & $NodeBin (Join-Path $Root "scripts\configure-gbrain.js") $ConfigFile $ModelName $Dimensions $BaseUrl
+}
 
 if (-not $SkipService) {
   $Runner = Join-Path $ServiceHome "run-bridgebrain.ps1"
@@ -72,6 +85,7 @@ if (-not $SkipService) {
 `$env:GBRAIN_CHATGPT_EMBED_PROFILE = "$Profile"
 `$env:GBRAIN_CHATGPT_EMBED_DIMENSIONS = "$Dimensions"
 `$env:GBRAIN_CHATGPT_EMBED_MODEL = "$ModelName"
+`$env:BRIDGEBRAIN_API_TOKEN = "$Token"
 `$env:BRIDGE_SCRIPT = "$((Join-Path $SkillDest "scripts\gpt-web-login-bridge.js").Replace("\", "\\"))"
 `$env:CACHE_DIR = "$((Join-Path $ServiceHome "cache").Replace("\", "\\"))"
 `$env:GPT_WEB_LOGIN_CODEX_BIN = "$($CodexBin.Replace("\", "\\"))"
@@ -99,4 +113,4 @@ if (-not $SkipVerify) {
 Write-Host "BridgeBrain installed."
 Write-Host "Model: litellm:$ModelName"
 Write-Host "Dimensions: $Dimensions"
-Write-Host "Endpoint: $BaseUrl"
+Write-Host "Endpoint: http://127.0.0.1:$Port/v1/t/<redacted>"
