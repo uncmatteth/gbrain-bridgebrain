@@ -16,9 +16,9 @@ done < <(find scripts -type f -name '*.sh' | sort)
 
 echo "PowerShell syntax..."
 if command -v pwsh >/dev/null 2>&1; then
-  pwsh -NoProfile -Command '$ErrorActionPreference="Stop"; foreach ($f in @("scripts/install.ps1","scripts/verify.ps1")) { [scriptblock]::Create((Get-Content $f -Raw)) > $null }'
+  pwsh -NoProfile -Command '$ErrorActionPreference="Stop"; foreach ($f in @("scripts/install.ps1","scripts/verify.ps1")) { if (Test-Path -LiteralPath $f) { [scriptblock]::Create((Get-Content -LiteralPath $f -Raw)) > $null } }'
 elif command -v powershell >/dev/null 2>&1; then
-  powershell -NoProfile -Command '$ErrorActionPreference="Stop"; foreach ($f in @("scripts/install.ps1","scripts/verify.ps1")) { [scriptblock]::Create((Get-Content $f -Raw)) > $null }'
+  powershell -NoProfile -Command '$ErrorActionPreference="Stop"; foreach ($f in @("scripts/install.ps1","scripts/verify.ps1")) { if (Test-Path -LiteralPath $f) { [scriptblock]::Create((Get-Content -LiteralPath $f -Raw)) > $null } }'
 else
   echo "PowerShell not available; Windows installer syntax not locally parsed."
 fi
