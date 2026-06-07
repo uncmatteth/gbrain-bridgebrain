@@ -86,6 +86,7 @@ if (-not $SkipService) {
 `$env:GBRAIN_CHATGPT_EMBED_DIMENSIONS = "$Dimensions"
 `$env:GBRAIN_CHATGPT_EMBED_MODEL = "$ModelName"
 `$env:BRIDGEBRAIN_API_TOKEN = "$Token"
+`$env:CODEX_HOME = "$($CodexHome.Replace("\", "\\"))"
 `$env:BRIDGE_SCRIPT = "$((Join-Path $SkillDest "scripts\gpt-web-login-bridge.js").Replace("\", "\\"))"
 `$env:CACHE_DIR = "$((Join-Path $ServiceHome "cache").Replace("\", "\\"))"
 `$env:GPT_WEB_LOGIN_CODEX_BIN = "$($CodexBin.Replace("\", "\\"))"

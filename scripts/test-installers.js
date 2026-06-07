@@ -90,6 +90,14 @@ esac
     PATH: `${bin}${path.delimiter}${process.env.PATH || ''}`,
   };
 
+  for (const template of [
+    path.join(root, 'systemd', 'gbrain-chatgpt-embeddings.service.template'),
+    path.join(root, 'launchd', 'com.gbrain.bridgebrain.embeddings.plist.template'),
+  ]) {
+    const text = fs.readFileSync(template, 'utf8');
+    if (!text.includes('CODEX_HOME')) fail(`${path.basename(template)} does not export CODEX_HOME`);
+  }
+
   const result = spawnSync('bash', ['scripts/install.sh', '--skip-service', '--skip-verify'], {
     cwd: root,
     env,

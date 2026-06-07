@@ -11,6 +11,7 @@ const HOST = process.env.GBRAIN_CHATGPT_EMBED_HOST || '127.0.0.1';
 const PORT = Number(process.env.GBRAIN_CHATGPT_EMBED_PORT || 4127);
 const CACHE_SCHEMA_VERSION = 2;
 const MAX_TEXT_CHARS = Number(process.env.MAX_TEXT_CHARS || 6000);
+const BRIDGE_BATCH_CHAR_BUDGET = Number(process.env.BRIDGE_BATCH_CHAR_BUDGET || 24000);
 const BRIDGE_TIMEOUT_MS = Number(process.env.BRIDGE_TIMEOUT_MS || 300000);
 const CODEX_BIN = process.env.GPT_WEB_LOGIN_CODEX_BIN || 'codex';
 const SUPPORTED_DIMENSIONS = new Set([768, 1536]);
@@ -387,8 +388,7 @@ function sanitizeSignature(signature) {
   return out;
 }
 
-function bridgeSignatures(missing) {
-  const output = runBridge(fingerprintPrompt(missing));
+function parseBatchSignatures(output, missing) {
   const parsed = extractJsonObject(output);
   if (parsed && Array.isArray(parsed.items)) {
     const byId = new Map();
@@ -401,11 +401,58 @@ function bridgeSignatures(missing) {
       return missing.map((item) => byId.get(item.id));
     }
   }
+  return null;
+}
 
-  return missing.map((item) => {
-    const single = runBridge(singleFingerprintPrompt(item.text)).trim();
-    return sanitizeSignature(extractJsonObject(single) || single);
-  });
+function singleBridgeSignature(item) {
+  const single = runBridge(singleFingerprintPrompt(item.text)).trim();
+  return sanitizeSignature(extractJsonObject(single) || single);
+}
+
+function bridgeSignatureBatch(items) {
+  try {
+    const parsed = parseBatchSignatures(runBridge(fingerprintPrompt(items)), items);
+    if (parsed) return parsed;
+  } catch (error) {
+    if (items.length === 1) throw error;
+  }
+
+  if (items.length === 1) return [singleBridgeSignature(items[0])];
+
+  const midpoint = Math.ceil(items.length / 2);
+  return [
+    ...bridgeSignatureBatch(items.slice(0, midpoint)),
+    ...bridgeSignatureBatch(items.slice(midpoint)),
+  ];
+}
+
+function bridgeSignatureChunks(items) {
+  const chunks = [];
+  let current = [];
+  let currentChars = 0;
+  const budget = Number.isFinite(BRIDGE_BATCH_CHAR_BUDGET) && BRIDGE_BATCH_CHAR_BUDGET > 0
+    ? BRIDGE_BATCH_CHAR_BUDGET
+    : 24000;
+  for (const item of items) {
+    const cost = item.text.length + 160;
+    if (current.length > 0 && currentChars + cost > budget) {
+      chunks.push(current);
+      current = [];
+      currentChars = 0;
+    }
+    current.push(item);
+    currentChars += cost;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
+function bridgeSignatures(missing) {
+  const signatures = [];
+  for (const chunk of bridgeSignatureChunks(missing)) {
+    signatures.push(...bridgeSignatureBatch(chunk));
+  }
+  return signatures;
 }
 
 function flattenSignature(signature) {

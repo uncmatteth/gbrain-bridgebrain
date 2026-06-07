@@ -128,6 +128,7 @@ async function main() {
       GBRAIN_CHATGPT_EMBED_MODEL: 'chatgpt-bridge-semantic-hash-1536',
       GBRAIN_CHATGPT_EMBED_DIMENSIONS: '1536',
       BRIDGEBRAIN_API_TOKEN: apiToken,
+      BRIDGE_BATCH_CHAR_BUDGET: '900',
       CACHE_DIR: cacheDir,
     },
   });
@@ -230,6 +231,24 @@ async function main() {
     });
     assert(compat.status === 200, `compat embedding status ${compat.status}`);
     assert(compat.json.data[0].embedding.length === 768, `expected 768 dims, got ${compat.json.data[0].embedding.length}`);
+
+    const beforeChunkStats = await request('GET', '/stats');
+    const chunked = await request('POST', embeddingsPath, {
+      model: 'chatgpt-bridge-semantic-hash-1536',
+      input: [
+        `BridgeBrain chunk split smoke one ${'alpha '.repeat(140)}`,
+        `BridgeBrain chunk split smoke two ${'bravo '.repeat(140)}`,
+        `BridgeBrain chunk split smoke three ${'charlie '.repeat(140)}`,
+      ],
+    });
+    assert(chunked.status === 200, `chunked embedding status ${chunked.status}`);
+    assert(chunked.json.data.length === 3, `expected 3 chunked embeddings, got ${chunked.json.data.length}`);
+    assert(chunked.json.data.every((row) => row.embedding.length === 1536), 'chunked embedding dimensions wrong');
+    const afterChunkStats = await request('GET', '/stats');
+    assert(
+      afterChunkStats.json.bridge_calls - beforeChunkStats.json.bridge_calls >= 3,
+      'chunked request did not split into multiple bridge calls',
+    );
 
     for (const dimensions of [1024, 4096, 0, -1, 'NaN', 100_000_000]) {
       const invalidDimensions = await request('POST', embeddingsPath, {

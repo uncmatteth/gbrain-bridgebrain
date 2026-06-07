@@ -31,6 +31,8 @@
     <string>@MODEL_NAME@</string>
     <key>BRIDGEBRAIN_API_TOKEN</key>
     <string>@API_TOKEN@</string>
+    <key>CODEX_HOME</key>
+    <string>@CODEX_HOME@</string>
     <key>BRIDGE_SCRIPT</key>
     <string>@CODEX_HOME@/skills/unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit/scripts/gpt-web-login-bridge.js</string>
     <key>CACHE_DIR</key>
