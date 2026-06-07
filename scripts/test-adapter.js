@@ -101,6 +101,25 @@ async function main() {
     assert(first.status === 200, `first embedding status ${first.status}`);
     assert(first.json.data[0].embedding.length === 1536, `expected 1536 dims, got ${first.json.data[0].embedding.length}`);
 
+    const single = await request('POST', '/v1/embeddings', {
+      model: 'chatgpt-bridge-semantic-hash-1536',
+      input: 'BridgeBrain single string input',
+    });
+    assert(single.status === 200, `single string embedding status ${single.status}`);
+    assert(single.json.data[0].embedding.length === 1536, `expected 1536 dims, got ${single.json.data[0].embedding.length}`);
+
+    const tokenArray = await request('POST', '/v1/embeddings', {
+      model: 'chatgpt-bridge-semantic-hash-1536',
+      input: [1, 2, 3],
+    });
+    assert(tokenArray.status === 400, `token array embedding status ${tokenArray.status}`);
+
+    const tokenArrayBatch = await request('POST', '/v1/embeddings', {
+      model: 'chatgpt-bridge-semantic-hash-1536',
+      input: [[1, 2, 3]],
+    });
+    assert(tokenArrayBatch.status === 400, `token array batch embedding status ${tokenArrayBatch.status}`);
+
     const compat = await request('POST', '/v1/embeddings', {
       model: 'chatgpt-bridge-semantic-hash-768',
       input: ['BridgeBrain adapter compatibility smoke test'],

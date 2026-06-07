@@ -112,6 +112,19 @@ function normalizeText(input) {
   return JSON.stringify(input ?? '').slice(0, MAX_TEXT_CHARS);
 }
 
+function requestError(statusCode, type, message) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  error.errorType = type;
+  return error;
+}
+
+function embeddingInputsFromRequest(rawInput) {
+  if (typeof rawInput === 'string') return [rawInput];
+  if (Array.isArray(rawInput) && rawInput.every((item) => typeof item === 'string')) return rawInput;
+  throw requestError(400, 'invalid_request_error', 'input must be a string or an array of strings');
+}
+
 function extractJsonObject(text) {
   const first = text.indexOf('{');
   const last = text.lastIndexOf('}');
@@ -492,8 +505,7 @@ async function handle(req, res) {
   if (req.method === 'POST' && (url.pathname === '/embeddings' || url.pathname === '/v1/embeddings')) {
     try {
       const request = await readJson(req);
-      const rawInput = request.input;
-      const inputs = Array.isArray(rawInput) ? rawInput : [rawInput ?? ''];
+      const inputs = embeddingInputsFromRequest(request.input);
       const normalizedInputs = inputs.map(normalizeText);
       const dimensions = resolveDimensions(request);
       const embeddings = getEmbeddings(inputs, dimensions);
@@ -511,10 +523,12 @@ async function handle(req, res) {
         },
       });
     } catch (error) {
-      sendJson(res, 503, {
+      const status = error && Number.isInteger(error.statusCode) ? error.statusCode : 503;
+      const type = (error && error.errorType) || 'chatgpt_bridge_embedding_error';
+      sendJson(res, status, {
         error: {
           message: error instanceof Error ? error.message : String(error),
-          type: 'chatgpt_bridge_embedding_error',
+          type,
         },
       });
     }
