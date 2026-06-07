@@ -41,6 +41,7 @@ const MODEL_NAME =
   process.env.GBRAIN_CHATGPT_EMBED_MODEL ||
   process.env.MODEL_NAME ||
   `chatgpt-bridge-semantic-hash-${DEFAULT_DIMENSIONS}`;
+const SUPPORTED_DIMENSIONS = new Set([768, 1536]);
 
 const stats = {
   started_at: new Date().toISOString(),
@@ -346,8 +347,14 @@ function addFeature(vector, feature, weight) {
   vector[index] += sign * weight;
 }
 
+function supportedDimensionsOrDefault(dimensions) {
+  const requested = Number(dimensions);
+  if (Number.isInteger(requested) && SUPPORTED_DIMENSIONS.has(requested)) return requested;
+  return SUPPORTED_DIMENSIONS.has(DEFAULT_DIMENSIONS) ? DEFAULT_DIMENSIONS : 1536;
+}
+
 function vectorFromSignature(signature, dimensions) {
-  const dim = Number.isFinite(dimensions) && dimensions > 0 ? Math.floor(dimensions) : DEFAULT_DIMENSIONS;
+  const dim = supportedDimensionsOrDefault(dimensions);
   const vector = new Array(dim).fill(0);
   const flattened = flattenSignature(signature);
   const tokens = tokenize(flattened);
@@ -445,9 +452,10 @@ function sendJson(res, status, payload) {
 }
 
 function resolveDimensions(request) {
-  if (request.dimensions) {
+  if (Object.prototype.hasOwnProperty.call(request, 'dimensions')) {
     const requested = Number(request.dimensions);
-    if (Number.isFinite(requested) && requested > 0) return Math.floor(requested);
+    if (Number.isInteger(requested) && SUPPORTED_DIMENSIONS.has(requested)) return requested;
+    throw requestError(400, 'invalid_request_error', 'dimensions must be one of: 768, 1536');
   }
   const model = String(request.model || MODEL_NAME);
   if (model.endsWith('-768')) return 768;

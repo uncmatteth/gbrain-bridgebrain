@@ -108,6 +108,17 @@ async function main() {
     assert(single.status === 200, `single string embedding status ${single.status}`);
     assert(single.json.data[0].embedding.length === 1536, `expected 1536 dims, got ${single.json.data[0].embedding.length}`);
 
+    const explicitDefault = await request('POST', '/v1/embeddings', {
+      model: 'chatgpt-bridge-semantic-hash-1536',
+      input: 'BridgeBrain explicit default dimensions',
+      dimensions: 1536,
+    });
+    assert(explicitDefault.status === 200, `explicit default embedding status ${explicitDefault.status}`);
+    assert(
+      explicitDefault.json.data[0].embedding.length === 1536,
+      `expected 1536 dims, got ${explicitDefault.json.data[0].embedding.length}`,
+    );
+
     const tokenArray = await request('POST', '/v1/embeddings', {
       model: 'chatgpt-bridge-semantic-hash-1536',
       input: [1, 2, 3],
@@ -127,6 +138,18 @@ async function main() {
     });
     assert(compat.status === 200, `compat embedding status ${compat.status}`);
     assert(compat.json.data[0].embedding.length === 768, `expected 768 dims, got ${compat.json.data[0].embedding.length}`);
+
+    for (const dimensions of [1024, 4096, 0, -1, 'NaN', 100_000_000]) {
+      const invalidDimensions = await request('POST', '/v1/embeddings', {
+        model: 'chatgpt-bridge-semantic-hash-1536',
+        input: ['BridgeBrain rejected dimensions smoke test'],
+        dimensions,
+      });
+      assert(
+        invalidDimensions.status === 400,
+        `invalid dimensions ${dimensions} status ${invalidDimensions.status}`,
+      );
+    }
 
     const beforeStats = await request('GET', '/stats');
     const repeat = await request('POST', '/v1/embeddings', {
