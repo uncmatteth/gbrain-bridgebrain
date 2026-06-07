@@ -26,6 +26,9 @@ fi
 echo "Adapter mock smoke..."
 node scripts/test-adapter.js
 
+echo "Installer smoke..."
+node scripts/test-installers.js
+
 echo "Mock eval..."
 node scripts/eval.js
 

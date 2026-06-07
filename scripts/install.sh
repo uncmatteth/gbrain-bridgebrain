@@ -102,7 +102,8 @@ install -m 0644 "$ROOT/bridge-skill/$SKILL_NAME/SKILL.md" "$SKILL_DEST/SKILL.md"
 install -m 0644 "$ROOT/bridge-skill/$SKILL_NAME/agents/openai.yaml" "$SKILL_DEST/agents/openai.yaml"
 install -m 0755 "$ROOT/bridge-skill/$SKILL_NAME/scripts/gpt-web-login-bridge.js" "$SKILL_DEST/scripts/gpt-web-login-bridge.js"
 
-"$NODE_BIN" "$SKILL_DEST/scripts/gpt-web-login-bridge.js" status
+GPT_WEB_LOGIN_CODEX_BIN="$CODEX_BIN" GPT_WEB_LOGIN_CWD="$HOME" \
+  "$NODE_BIN" "$SKILL_DEST/scripts/gpt-web-login-bridge.js" status
 "$NODE_BIN" "$ROOT/scripts/patch-gbrain-litellm.js"
 
 mkdir -p "$GBRAIN_HOME"
@@ -173,8 +174,10 @@ if [[ "$SKIP_SERVICE" -ne 1 ]]; then
   fi
 fi
 
-sleep 2
-curl -fsS "http://127.0.0.1:${PORT}/health" >/tmp/bridgebrain-health.json
+if [[ "$SKIP_SERVICE" -ne 1 ]]; then
+  sleep 2
+  curl -fsS "http://127.0.0.1:${PORT}/health" >/tmp/bridgebrain-health.json
+fi
 
 if [[ "$SKIP_VERIFY" -ne 1 ]]; then
   "$ROOT/scripts/verify.sh"

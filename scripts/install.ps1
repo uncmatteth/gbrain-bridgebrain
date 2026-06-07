@@ -50,10 +50,12 @@ Copy-Item -Force (Join-Path $Root "bridge-skill\$SkillName\SKILL.md") (Join-Path
 Copy-Item -Force (Join-Path $Root "bridge-skill\$SkillName\agents\openai.yaml") (Join-Path $SkillDest "agents\openai.yaml")
 Copy-Item -Force (Join-Path $Root "bridge-skill\$SkillName\scripts\gpt-web-login-bridge.js") (Join-Path $SkillDest "scripts\gpt-web-login-bridge.js")
 
+$env:GPT_WEB_LOGIN_CODEX_BIN = $CodexBin
+$env:GPT_WEB_LOGIN_CWD = $HOME
 & $NodeBin (Join-Path $SkillDest "scripts\gpt-web-login-bridge.js") status
 & $NodeBin (Join-Path $Root "scripts\patch-gbrain-litellm.js")
 
-$GbrainHome = Join-Path $HOME ".gbrain"
+$GbrainHome = if ($env:GBRAIN_HOME) { $env:GBRAIN_HOME } else { Join-Path $HOME ".gbrain" }
 $ConfigFile = Join-Path $GbrainHome "config.json"
 New-Item -ItemType Directory -Force -Path $GbrainHome | Out-Null
 if (-not (Test-Path $ConfigFile)) {
@@ -85,8 +87,10 @@ if (-not $SkipService) {
   Start-ScheduledTask -TaskName $TaskName
 }
 
-Start-Sleep -Seconds 2
-Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" | Out-Null
+if (-not $SkipService) {
+  Start-Sleep -Seconds 2
+  Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health" | Out-Null
+}
 
 if (-not $SkipVerify) {
   & (Join-Path $Root "scripts\verify.ps1")

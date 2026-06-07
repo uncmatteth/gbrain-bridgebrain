@@ -18,6 +18,13 @@ function commandPath(name) {
   return run('sh', ['-lc', `command -v ${name}`]);
 }
 
+function gbrainBinaryCandidates() {
+  const candidates = [];
+  if (process.env.GBRAIN_BIN) candidates.push(process.env.GBRAIN_BIN.trim());
+  candidates.push(commandPath('gbrain'));
+  return candidates.filter((candidate, index, all) => candidate && all.indexOf(candidate) === index);
+}
+
 function realpathMaybe(file) {
   try {
     return fs.realpathSync(file);
@@ -59,8 +66,7 @@ function candidateGatewayFiles() {
   const explicit = process.env.GBRAIN_GATEWAY_TS;
   if (explicit) files.add(explicit);
 
-  const gbrainPath = commandPath('gbrain');
-  if (gbrainPath) {
+  for (const gbrainPath of gbrainBinaryCandidates()) {
     const resolved = realpathMaybe(gbrainPath);
     const normalized = resolved.replace(/\\/g, '/');
     if (normalized.endsWith('/src/cli.ts')) {
