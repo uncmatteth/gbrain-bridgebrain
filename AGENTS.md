@@ -78,6 +78,24 @@ Windows PowerShell:
 
 The installer copies the bundled bridge skill into the current user's Codex home, installs the local embedding service, patches GBrain's LiteLLM compatibility check, writes GBrain provider config, starts the platform service, and runs verification.
 
+## GBrain Updates
+
+To check whether upstream GBrain has new commits:
+
+```bash
+npm run gbrain:update:check
+```
+
+This may write only a small local update-state file under the target user's GBrain home so later checks can compare commits. It must not upgrade GBrain, scan machine-memory roots, or write anything inside this repo.
+
+Do not apply an update unless the user explicitly asks:
+
+```bash
+npm run gbrain:update:apply
+```
+
+The apply command must keep all gates intact: pre-upgrade `gbrain doctor --json`, BridgeBrain tests, package guard, local backup outside this repo, `gbrain upgrade`, BridgeBrain patch reapply, post-upgrade doctor, and final `npm run check`. If any gate fails, stop and report the failure plus the backup path if one was created.
+
 ## Machine Memory
 
 Machine memory is off by default. Do not enable it unless the user explicitly asks for it and gives exact roots.

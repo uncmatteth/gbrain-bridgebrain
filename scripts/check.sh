@@ -32,6 +32,9 @@ node scripts/test-bridge.js
 echo "Installer smoke..."
 node scripts/test-installers.js
 
+echo "GBrain update checker smoke..."
+node scripts/test-gbrain-update-check.js
+
 echo "Mock eval..."
 node scripts/eval.js
 

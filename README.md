@@ -155,6 +155,40 @@ Use `--machine-memory-sync-now` or `-MachineMemorySyncNow` to run the first sync
 
 On PGLite, long-running stdio `gbrain serve` processes can hold the database lock. The default is `GBRAIN_MACHINE_TERMINATE_SERVE=none`. On Linux/macOS, set `GBRAIN_MACHINE_TERMINATE_SERVE=all` only on machines where scheduled sync is allowed to interrupt active GBrain MCP sessions; Codex can respawn MCP after sync. Windows does not support that mode; leave it `none` and stop `gbrain serve` manually before scheduled sync if needed.
 
+## GBrain Updates
+
+GBrain moves fast. BridgeBrain includes a guarded update helper so the BridgeBrain boost can keep pace with upstream GBrain without surprise upgrades.
+
+Check for new upstream GBrain commits:
+
+```bash
+npm run gbrain:update:check
+```
+
+The check reads `garrytan/gbrain`'s upstream `HEAD` commit and records the last seen commit in a small local state file under the user's GBrain home. It does not upgrade GBrain, patch files, run sync, scan source roots, or touch the brain database. For a read-only check:
+
+```bash
+npm run gbrain:update:check -- --no-write-state
+```
+
+Apply an update only after review:
+
+```bash
+npm run gbrain:update:apply
+```
+
+The apply command is intentionally strict:
+
+- runs `gbrain doctor --json` before the upgrade;
+- runs BridgeBrain adapter tests and package guard before the upgrade;
+- writes a timestamped local backup outside this repo;
+- runs `gbrain upgrade`;
+- reapplies the BridgeBrain LiteLLM compatibility patch;
+- runs `gbrain doctor --json` again;
+- runs the full repo check after the upgrade.
+
+If doctor or tests fail, the upgrade stops. If a post-upgrade gate fails, the command prints the backup path and stops instead of silently rolling back a live local brain.
+
 ## Compatibility Mode
 
 Default is 1536 dimensions:

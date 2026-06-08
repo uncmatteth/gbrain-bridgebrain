@@ -12,6 +12,8 @@
     "test": "node scripts/test-adapter.js",
     "eval": "node scripts/eval.js",
     "hygiene": "bash scripts/hygiene-scan.sh",
+    "gbrain:update:check": "node scripts/gbrain-update-check.js check",
+    "gbrain:update:apply": "node scripts/gbrain-update-check.js apply",
     "package:guard": "node scripts/package-guard.js",
     "prepack": "node scripts/package-guard.js",
     "prepublishOnly": "node scripts/package-guard.js --publish"
