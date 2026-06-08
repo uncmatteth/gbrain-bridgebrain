@@ -10,12 +10,19 @@ $GbrainHomeParent = if ($env:GBRAIN_HOME) { $env:GBRAIN_HOME } else { $HOME }
 $GbrainConfigDir = Join-Path $GbrainHomeParent ".gbrain"
 $SkillName = "unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit"
 $BridgeScript = if ($env:BRIDGE_SCRIPT) { $env:BRIDGE_SCRIPT } else { Join-Path $CodexHome "skills\$SkillName\scripts\gpt-web-login-bridge.js" }
+$NodeBin = if ($env:NODE_BIN) { $env:NODE_BIN } else { (Get-Command node -ErrorAction SilentlyContinue).Source }
+$CodexBin = if ($env:CODEX_BIN) { $env:CODEX_BIN } else { (Get-Command codex -ErrorAction SilentlyContinue).Source }
+$GbrainBin = if ($env:GBRAIN_BIN) { $env:GBRAIN_BIN } else { (Get-Command gbrain -ErrorAction SilentlyContinue).Source }
 $Port = if ($env:GBRAIN_CHATGPT_EMBED_PORT) { $env:GBRAIN_CHATGPT_EMBED_PORT } else { "4127" }
 $Profile = if ($env:BRIDGEBRAIN_PROFILE) { $env:BRIDGEBRAIN_PROFILE } elseif ($env:GBRAIN_CHATGPT_EMBED_PROFILE) { $env:GBRAIN_CHATGPT_EMBED_PROFILE } else { "quality" }
 $ModelName = if ($env:GBRAIN_CHATGPT_EMBED_MODEL) { $env:GBRAIN_CHATGPT_EMBED_MODEL } else { "chatgpt-bridge-semantic-hash-1536" }
 $Dimensions = if ($env:GBRAIN_CHATGPT_EMBED_DIMENSIONS) { $env:GBRAIN_CHATGPT_EMBED_DIMENSIONS } else { "1536" }
 $Token = if ($env:BRIDGEBRAIN_API_TOKEN) { $env:BRIDGEBRAIN_API_TOKEN } elseif ($env:GBRAIN_CHATGPT_EMBED_TOKEN) { $env:GBRAIN_CHATGPT_EMBED_TOKEN } else { "" }
 $BaseUrl = "http://127.0.0.1:$Port/v1"
+$HealthUrl = "$BaseUrl/health"
+$ProfileEnvSet = [bool]($env:BRIDGEBRAIN_PROFILE -or $env:GBRAIN_CHATGPT_EMBED_PROFILE)
+$ModelEnvSet = [bool]$env:GBRAIN_CHATGPT_EMBED_MODEL
+$DimensionsEnvSet = [bool]$env:GBRAIN_CHATGPT_EMBED_DIMENSIONS
 
 if ($Profile -eq "compat") {
   if (-not $env:GBRAIN_CHATGPT_EMBED_MODEL) { $ModelName = "chatgpt-bridge-semantic-hash-768" }
@@ -35,7 +42,7 @@ function Test-GBrainHome($PathValue) {
 }
 
 Test-GBrainHome $GbrainHomeParent
-if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Fail "node is missing" }
+if (-not $NodeBin) { Fail "node is missing" }
 
 $ConfigFile = Join-Path $GbrainConfigDir "config.json"
 if (Test-Path $ConfigFile) {
@@ -43,20 +50,35 @@ if (Test-Path $ConfigFile) {
   if ($ConfigForBaseUrl.provider_base_urls.litellm) {
     $BaseUrl = $ConfigForBaseUrl.provider_base_urls.litellm
   }
+  if (-not $ModelEnvSet -and -not $ProfileEnvSet -and $ConfigForBaseUrl.embedding_model) {
+    $ModelName = "$($ConfigForBaseUrl.embedding_model)" -replace '^litellm:', ''
+  }
+  if (-not $DimensionsEnvSet -and -not $ProfileEnvSet -and $ConfigForBaseUrl.embedding_dimensions) {
+    $Dimensions = "$($ConfigForBaseUrl.embedding_dimensions)"
+  }
 }
 if ($BaseUrl -eq "http://127.0.0.1:$Port/v1" -and $Token) {
   $BaseUrl = "http://127.0.0.1:$Port/v1/t/$Token"
 }
+$HealthUrl = "$($BaseUrl.TrimEnd('/'))/health"
+if (-not $ProfileEnvSet) {
+  if ($ModelName -like "*-768" -or "$Dimensions" -eq "768") {
+    $Profile = "compat"
+  } elseif ($Profile -ne "mock") {
+    $Profile = "quality"
+  }
+}
 
 if ($Profile -ne "mock" -and -not $SkipBridge) {
-  if (-not (Get-Command codex -ErrorAction SilentlyContinue)) { Fail "codex is missing" }
+  if (-not $CodexBin) { Fail "codex is missing" }
   if (-not (Test-Path $BridgeScript)) { Fail "bridge script missing at $BridgeScript" }
   Write-Host "Checking ChatGPT web-login bridge..."
-  node $BridgeScript status
+  $env:GPT_WEB_LOGIN_CODEX_BIN = $CodexBin
+  & $NodeBin $BridgeScript status
 }
 
 Write-Host "Checking local embedding service..."
-$Health = Invoke-RestMethod -Uri "http://127.0.0.1:$Port/health"
+$Health = Invoke-RestMethod -Uri $HealthUrl
 if (-not $Health.ok) { Fail "health.ok is false" }
 if ($Health.model -ne $ModelName) { Fail "model mismatch: $($Health.model) != $ModelName" }
 if ([int]$Health.dimensions -ne [int]$Dimensions) { Fail "dimension mismatch: $($Health.dimensions) != $Dimensions" }
@@ -80,7 +102,7 @@ if ($SkipGbrain) {
   exit 0
 }
 
-if (-not (Get-Command gbrain -ErrorAction SilentlyContinue)) { Fail "gbrain is missing" }
+if (-not $GbrainBin) { Fail "gbrain is missing" }
 
 Write-Host "Checking GBrain config..."
 $Config = Get-Content $ConfigFile -Raw | ConvertFrom-Json
@@ -90,10 +112,10 @@ if ([int]$Config.embedding_dimensions -ne [int]$Dimensions) { Fail "wrong embedd
 if ($Config.provider_base_urls.litellm -ne $BaseUrl) { Fail "wrong litellm base url: $($Config.provider_base_urls.litellm)" }
 
 Write-Host "Checking GBrain provider..."
-gbrain providers test
+& $GbrainBin providers test
 
 Write-Host "Checking GBrain doctor summary..."
-$DoctorJson = gbrain doctor --json
+$DoctorJson = & $GbrainBin doctor --json
 $Doctor = $DoctorJson | ConvertFrom-Json
 $Provider = $Doctor.checks | Where-Object { $_.name -eq "embedding_provider" } | Select-Object -First 1
 $Width = $Doctor.checks | Where-Object { $_.name -eq "embedding_width_consistency" } | Select-Object -First 1

@@ -61,7 +61,7 @@ function walkForGatewayFiles(root, files) {
   }
 }
 
-function candidateGatewayFiles() {
+function activeGatewayFiles() {
   const files = new Set();
   const explicit = process.env.GBRAIN_GATEWAY_TS;
   if (explicit) files.add(explicit);
@@ -78,9 +78,19 @@ function candidateGatewayFiles() {
 
   const home = os.homedir();
   files.add(path.join(home, '.bun', 'install', 'global', 'node_modules', 'gbrain', 'src', 'core', 'ai', 'gateway.ts'));
-  walkForGatewayFiles(path.join(home, '.bun', 'install', 'cache'), files);
 
   return [...files].map(realpathMaybe).filter((file, index, all) => file && all.indexOf(file) === index && fs.existsSync(file));
+}
+
+function cacheGatewayFiles(activeFiles) {
+  const files = new Set();
+  const active = new Set(activeFiles.map(realpathMaybe));
+  const home = os.homedir();
+  walkForGatewayFiles(path.join(home, '.bun', 'install', 'cache'), files);
+
+  return [...files]
+    .map(realpathMaybe)
+    .filter((file, index, all) => file && all.indexOf(file) === index && fs.existsSync(file) && !active.has(file));
 }
 
 function patchFile(file) {
@@ -118,8 +128,8 @@ function patchFile(file) {
   return 'patched';
 }
 
-const files = candidateGatewayFiles();
-if (files.length === 0) {
+const activeFiles = activeGatewayFiles();
+if (activeFiles.length === 0) {
   console.error('Could not find installed gbrain gateway.ts. Set GBRAIN_GATEWAY_TS to the installed gateway.ts path if your install layout changed.');
   process.exit(1);
 }
@@ -127,7 +137,7 @@ if (files.length === 0) {
 let patched = 0;
 let ok = 0;
 let failed = 0;
-for (const file of files) {
+for (const file of activeFiles) {
   const status = patchFile(file);
   console.log(`${status}: ${file}`);
   if (status === 'patched') patched += 1;
@@ -141,8 +151,22 @@ if (ok === 0) {
 }
 
 if (failed > 0) {
-  console.error('At least one gateway.ts did not match the expected patch pattern. Review the files above before continuing.');
+  console.error('The active gbrain gateway.ts did not match the expected patch pattern. Review the active install before continuing.');
   process.exit(1);
 }
 
-console.log(`BridgeBrain GBrain LiteLLM patch ready (${patched} patched, ${ok - patched} already patched).`);
+let cachePatched = 0;
+let cacheOk = 0;
+let cacheSkipped = 0;
+for (const file of cacheGatewayFiles(activeFiles)) {
+  const status = patchFile(file);
+  console.log(`cache_${status}: ${file}`);
+  if (status === 'patched') cachePatched += 1;
+  if (status === 'patched' || status === 'already_patched') cacheOk += 1;
+  if (status === 'pattern_not_found') cacheSkipped += 1;
+}
+
+console.log(
+  `BridgeBrain GBrain LiteLLM patch ready (${patched} active patched, ${ok - patched} active already patched, ` +
+    `${cachePatched} cache patched, ${cacheOk - cachePatched} cache already patched, ${cacheSkipped} cache skipped).`,
+);

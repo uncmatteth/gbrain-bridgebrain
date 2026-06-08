@@ -203,7 +203,7 @@ fi
 
 if [[ "$SKIP_SERVICE" -ne 1 ]]; then
   sleep 2
-  curl -fsS "http://127.0.0.1:${PORT}/health" >/tmp/bridgebrain-health.json
+  curl -fsS "http://127.0.0.1:${PORT}/health" >/dev/null
 fi
 
 if [[ "$SKIP_VERIFY" -ne 1 ]]; then

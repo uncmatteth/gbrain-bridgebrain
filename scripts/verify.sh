@@ -7,16 +7,27 @@ GBRAIN_CONFIG_DIR="${GBRAIN_HOME_PARENT%/}/.gbrain"
 CONFIG_FILE="$GBRAIN_CONFIG_DIR/config.json"
 SKILL_NAME="unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit"
 BRIDGE_SCRIPT="${BRIDGE_SCRIPT:-$CODEX_HOME/skills/$SKILL_NAME/scripts/gpt-web-login-bridge.js}"
+NODE_BIN="${NODE_BIN:-$(command -v node || true)}"
+CODEX_BIN="${CODEX_BIN:-$(command -v codex || true)}"
+GBRAIN_BIN="${GBRAIN_BIN:-$(command -v gbrain || true)}"
 PORT="${GBRAIN_CHATGPT_EMBED_PORT:-4127}"
 PROFILE="${BRIDGEBRAIN_PROFILE:-${GBRAIN_CHATGPT_EMBED_PROFILE:-quality}}"
 MODEL_NAME="${GBRAIN_CHATGPT_EMBED_MODEL:-chatgpt-bridge-semantic-hash-1536}"
 DIMENSIONS="${GBRAIN_CHATGPT_EMBED_DIMENSIONS:-1536}"
 TOKEN="${BRIDGEBRAIN_API_TOKEN:-${GBRAIN_CHATGPT_EMBED_TOKEN:-}}"
 BASE_URL="http://127.0.0.1:${PORT}/v1"
+HEALTH_URL="${BASE_URL}/health"
 SKIP_GBRAIN=0
 SKIP_BRIDGE=0
+PROFILE_ENV_SET=0
+MODEL_ENV_SET=0
+DIMENSIONS_ENV_SET=0
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
+
+[[ -n "${BRIDGEBRAIN_PROFILE:-}${GBRAIN_CHATGPT_EMBED_PROFILE:-}" ]] && PROFILE_ENV_SET=1
+[[ -n "${GBRAIN_CHATGPT_EMBED_MODEL:-}" ]] && MODEL_ENV_SET=1
+[[ -n "${GBRAIN_CHATGPT_EMBED_DIMENSIONS:-}" ]] && DIMENSIONS_ENV_SET=1
 
 usage() {
   cat <<'EOF'
@@ -52,43 +63,68 @@ validate_gbrain_home() {
   fi
 }
 
+need_cmd() {
+  local name="$1"
+  local value="$2"
+  [[ -n "$value" ]] || fail "$name is missing"
+}
+
 if [[ "$PROFILE" == "compat" ]]; then
   MODEL_NAME="${GBRAIN_CHATGPT_EMBED_MODEL:-chatgpt-bridge-semantic-hash-768}"
   DIMENSIONS="${GBRAIN_CHATGPT_EMBED_DIMENSIONS:-768}"
 fi
 
 validate_gbrain_home
-command -v node >/dev/null 2>&1 || fail "node is missing"
+need_cmd node "$NODE_BIN"
 command -v curl >/dev/null 2>&1 || fail "curl is missing"
 
-CONFIG_BASE_URL="$(
-  node - "$CONFIG_FILE" <<'NODE'
+mapfile -t CONFIG_INFO < <("$NODE_BIN" - "$CONFIG_FILE" <<'NODE'
 const fs = require('fs');
 const file = process.argv[2];
 try {
   const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
-  process.stdout.write(cfg.provider_base_urls?.litellm || '');
+  const baseUrl = cfg.provider_base_urls?.litellm || '';
+  const model = String(cfg.embedding_model || '').replace(/^litellm:/, '');
+  const dimensions = cfg.embedding_dimensions ? String(cfg.embedding_dimensions) : '';
+  process.stdout.write(`${baseUrl}\n${model}\n${dimensions}\n`);
 } catch {
-  process.stdout.write('');
+  process.stdout.write('\n\n\n');
 }
 NODE
-)"
+)
+CONFIG_BASE_URL="${CONFIG_INFO[0]:-}"
+CONFIG_MODEL="${CONFIG_INFO[1]:-}"
+CONFIG_DIMENSIONS="${CONFIG_INFO[2]:-}"
 if [[ -n "$CONFIG_BASE_URL" ]]; then
   BASE_URL="$CONFIG_BASE_URL"
 elif [[ -n "$TOKEN" ]]; then
   BASE_URL="http://127.0.0.1:${PORT}/v1/t/${TOKEN}"
 fi
+HEALTH_URL="${BASE_URL%/}/health"
+if [[ "$MODEL_ENV_SET" -ne 1 && "$PROFILE_ENV_SET" -ne 1 && -n "$CONFIG_MODEL" ]]; then
+  MODEL_NAME="$CONFIG_MODEL"
+fi
+if [[ "$DIMENSIONS_ENV_SET" -ne 1 && "$PROFILE_ENV_SET" -ne 1 && -n "$CONFIG_DIMENSIONS" ]]; then
+  DIMENSIONS="$CONFIG_DIMENSIONS"
+fi
+if [[ "$PROFILE_ENV_SET" -ne 1 ]]; then
+  if [[ "$MODEL_NAME" == *-768 || "$DIMENSIONS" == "768" ]]; then
+    PROFILE="compat"
+  elif [[ "$PROFILE" != "mock" ]]; then
+    PROFILE="quality"
+  fi
+fi
 
 if [[ "$PROFILE" != "mock" && "$SKIP_BRIDGE" -ne 1 ]]; then
-  command -v codex >/dev/null 2>&1 || fail "codex is missing"
+  need_cmd codex "$CODEX_BIN"
   [[ -f "$BRIDGE_SCRIPT" ]] || fail "bridge script missing at $BRIDGE_SCRIPT"
   echo "Checking ChatGPT web-login bridge..."
-  node "$BRIDGE_SCRIPT" status
+  GPT_WEB_LOGIN_CODEX_BIN="$CODEX_BIN" "$NODE_BIN" "$BRIDGE_SCRIPT" status
 fi
 
 echo "Checking local embedding service..."
-curl -fsS "http://127.0.0.1:${PORT}/health" >"$TMP_DIR/health.json"
-BRIDGEBRAIN_VERIFY_HEALTH_JSON="$TMP_DIR/health.json" node - "$MODEL_NAME" "$DIMENSIONS" "$PROFILE" <<'NODE'
+curl -fsS "$HEALTH_URL" >"$TMP_DIR/health.json"
+BRIDGEBRAIN_VERIFY_HEALTH_JSON="$TMP_DIR/health.json" "$NODE_BIN" - "$MODEL_NAME" "$DIMENSIONS" "$PROFILE" <<'NODE'
 const fs = require('fs');
 const [expectedModel, expectedDimsRaw, expectedProfile] = process.argv.slice(2);
 const health = JSON.parse(fs.readFileSync(process.env.BRIDGEBRAIN_VERIFY_HEALTH_JSON, 'utf8'));
@@ -103,7 +139,7 @@ curl -fsS -X POST "$BASE_URL/embeddings" \
   -H 'content-type: application/json' \
   -d '{"model":"chatgpt-bridge-semantic-hash-1536","input":["BridgeBrain verification smoke test"]}' \
   >"$TMP_DIR/embedding-1536.json"
-BRIDGEBRAIN_VERIFY_EMBEDDING_JSON="$TMP_DIR/embedding-1536.json" node <<'NODE'
+BRIDGEBRAIN_VERIFY_EMBEDDING_JSON="$TMP_DIR/embedding-1536.json" "$NODE_BIN" <<'NODE'
 const fs = require('fs');
 const response = JSON.parse(fs.readFileSync(process.env.BRIDGEBRAIN_VERIFY_EMBEDDING_JSON, 'utf8'));
 const embedding = response?.data?.[0]?.embedding;
@@ -117,7 +153,7 @@ curl -fsS -X POST "$BASE_URL/embeddings" \
   -H 'content-type: application/json' \
   -d '{"model":"chatgpt-bridge-semantic-hash-768","input":["BridgeBrain compatibility smoke test"],"dimensions":768}' \
   >"$TMP_DIR/embedding-768.json"
-BRIDGEBRAIN_VERIFY_EMBEDDING_JSON="$TMP_DIR/embedding-768.json" node <<'NODE'
+BRIDGEBRAIN_VERIFY_EMBEDDING_JSON="$TMP_DIR/embedding-768.json" "$NODE_BIN" <<'NODE'
 const fs = require('fs');
 const response = JSON.parse(fs.readFileSync(process.env.BRIDGEBRAIN_VERIFY_EMBEDDING_JSON, 'utf8'));
 const embedding = response?.data?.[0]?.embedding;
@@ -132,10 +168,10 @@ if [[ "$SKIP_GBRAIN" -eq 1 ]]; then
   exit 0
 fi
 
-command -v gbrain >/dev/null 2>&1 || fail "gbrain is missing"
+need_cmd gbrain "$GBRAIN_BIN"
 
 echo "Checking GBrain config..."
-node - "$CONFIG_FILE" "$MODEL_NAME" "$DIMENSIONS" "$BASE_URL" <<'NODE'
+"$NODE_BIN" - "$CONFIG_FILE" "$MODEL_NAME" "$DIMENSIONS" "$BASE_URL" <<'NODE'
 const fs = require('fs');
 const [file, model, dimsRaw, baseUrl] = process.argv.slice(2);
 const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -146,11 +182,11 @@ if (cfg.provider_base_urls?.litellm !== baseUrl) throw new Error(`wrong litellm 
 NODE
 
 echo "Checking GBrain provider..."
-gbrain providers test
+"$GBRAIN_BIN" providers test
 
 echo "Checking GBrain doctor summary..."
-gbrain doctor --json 2>"$TMP_DIR/doctor-stderr.jsonl" >"$TMP_DIR/doctor.json"
-BRIDGEBRAIN_VERIFY_DOCTOR_JSON="$TMP_DIR/doctor.json" node - "$MODEL_NAME" <<'NODE'
+"$GBRAIN_BIN" doctor --json 2>"$TMP_DIR/doctor-stderr.jsonl" >"$TMP_DIR/doctor.json"
+BRIDGEBRAIN_VERIFY_DOCTOR_JSON="$TMP_DIR/doctor.json" "$NODE_BIN" - "$MODEL_NAME" <<'NODE'
 const fs = require('fs');
 const expectedModel = process.argv[2];
 const doctor = JSON.parse(fs.readFileSync(process.env.BRIDGEBRAIN_VERIFY_DOCTOR_JSON, 'utf8'));

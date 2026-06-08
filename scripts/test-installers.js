@@ -84,14 +84,22 @@ esac
 `);
 
   const gateway = path.join(temp, 'gateway.ts');
-  fs.writeFileSync(gateway, `  // Openai-compat recipes with empty models list require a user-provided model.
-  const isUserProvided = (tp as any).user_provided_models === true;
-  if (
-    Array.isArray(tp.models) &&
-    tp.models.length === 0 &&
-    (recipe.id === 'litellm' || isUserProvided)
-  ) {
-`);
+  fs.writeFileSync(
+    gateway,
+    [
+      '  // Openai-compat recipes with empty models list require a user-provided model.',
+      '  const isUserProvided = (tp as any).user_provided_models === true;',
+      '  if (',
+      '    Array.isArray(tp.models) &&',
+      '    tp.models.length === 0 &&',
+      "    (recipe.id === 'litellm' || isUserProvided)",
+      '  ) {',
+      '',
+    ].join('\n'),
+  );
+  const staleCacheGateway = path.join(temp, 'home', '.bun', 'install', 'cache', '@GH@garrytan-gbrain-stale@@@1', 'src', 'core', 'ai', 'gateway.ts');
+  fs.mkdirSync(path.dirname(staleCacheGateway), { recursive: true });
+  fs.writeFileSync(staleCacheGateway, 'export const stale = true;\n');
 
   const env = {
     ...process.env,
@@ -121,6 +129,8 @@ esac
   if (!installPs1.includes('--skip-embed-check')) fail('install.ps1 missing skip embed check init flag');
   if (!installPs1.includes('Protect-LocalSecretPath $ConfigFile')) fail('install.ps1 does not protect tokenized config file');
   if (!verifyPs1.includes('Join-Path $GbrainConfigDir "config.json"')) fail('verify.ps1 must use GBRAIN_HOME/.gbrain config path');
+  if (!verifyPs1.includes('$env:GPT_WEB_LOGIN_CODEX_BIN = $CodexBin')) fail('verify.ps1 does not honor CODEX_BIN for bridge status');
+  if (!verifyPs1.includes('& $GbrainBin doctor --json')) fail('verify.ps1 does not honor GBRAIN_BIN for doctor');
 
   const result = spawnSync('bash', ['scripts/install.sh', '--skip-service', '--skip-verify'], {
     cwd: root,
