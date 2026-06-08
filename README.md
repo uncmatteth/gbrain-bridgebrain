@@ -1,10 +1,40 @@
 # GBrain BridgeBrain
 
-GBrain embeddings through your own Codex ChatGPT web-login bridge. No Ollama, no GPU, no extra embedding API key. Benchmark it, break it, prove it.
+Local side-brain installer for GBrain: Codex ChatGPT-login embeddings, no Ollama, no GPU, no extra embedding API key.
 
-BridgeBrain is a local OpenAI-compatible embeddings adapter for GBrain. It turns text into fixed-width vectors by asking a bundled Codex ChatGPT web-login bridge for structured semantic fingerprints, then hashing those fingerprints into deterministic normalized vectors.
+BridgeBrain helps GBrain understand text well enough to search and remember useful context for agents. It installs a local embeddings service that talks to the target user's already-logged-in Codex CLI. It does not copy credentials, scrape browser cookies, scan the computer by default, or require a separate embedding provider.
 
-This exists because the normal setup path is annoying as hell if you want strong retrieval without running a local embedding daemon or paying another embedding provider.
+Plain English: GBrain is the brain, BridgeBrain is the bridge that gives that brain useful embeddings through the user's own Codex ChatGPT login.
+
+## Side Brain vs Main Brain
+
+By default, this repo makes GBrain a **side brain**:
+
+- GBrain gets a local embeddings endpoint.
+- GBrain can search and store context better.
+- Nothing scans the whole machine.
+- Codex, OpenClaw, and other agents are not automatically rewired.
+- Machine-memory sync is off unless explicitly enabled with exact roots.
+
+To make GBrain a **main brain**, do that as a separate, explicit setup:
+
+1. Install BridgeBrain and verify it works.
+2. Point Codex, OpenClaw, or other agents at GBrain through their MCP/tool configuration.
+3. Choose exact source roots to sync, such as specific repo folders.
+4. Enable machine memory only with `BRIDGEBRAIN_ENABLE_MACHINE_MEMORY=1` and `GBRAIN_MACHINE_ROOTS=...`.
+5. Verify each agent can query GBrain before adding broader sources.
+
+That split is intentional. The public repo is safe by default; a personal machine can be wired deeper only when the owner asks for it.
+
+## Give This Repo To An Agent
+
+For another user's agent, the short instruction is:
+
+```text
+Read AGENTS.md first. Install this repo locally. Do not enable GitHub Actions or cloud CI. Do not inspect or copy auth files. Run package guard and dry-run first. Install missing platform prerequisites only through normal package managers or official installers. Stop if Codex is not logged in.
+```
+
+The agent-facing playbook is `AGENTS.md`. It tells the agent how to check Node, Codex, GBrain, and Bun; how to run dry-run; and where to stop instead of touching secrets.
 
 ## What It Ships
 
@@ -27,6 +57,8 @@ This exists because the normal setup path is annoying as hell if you want strong
 - No login automation.
 - No credential copying.
 - No shared ChatGPT account trick.
+- No whole-computer scan by default.
+- No automatic "main brain" wiring for Codex, OpenClaw, or other agents.
 - No benchmark victory lap without data.
 
 Every machine uses its own already-authenticated Codex ChatGPT login. BridgeBrain never reads, copies, prints, packages, or persists raw credentials. If Codex is not logged in, install stops instead of doing credential-handling bullshit.

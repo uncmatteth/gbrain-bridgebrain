@@ -2,7 +2,7 @@
   "name": "gbrain-bridgebrain",
   "version": "0.1.0",
   "private": true,
-  "description": "GBrain embeddings through your own Codex ChatGPT web-login bridge. No Ollama, no GPU, no extra embedding API key. Benchmark it, break it, prove it.",
+  "description": "Local side-brain installer for GBrain: Codex ChatGPT-login embeddings, no Ollama, no GPU, no extra embedding API key.",
   "type": "commonjs",
   "bin": {
     "gbrain-bridgebrain": "src/gbrain-chatgpt-embeddings-server.js"

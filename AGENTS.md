@@ -2,11 +2,14 @@
 
 This repo is intended to be installable by an agent on the target user's own machine. Keep the install boring, local, and explicit.
 
+Default role: install GBrain as a local side brain with BridgeBrain embeddings. Do not turn it into the main memory layer for Codex, OpenClaw, or other agents unless the user explicitly asks for that separate wiring step.
+
 ## Hard Boundaries
 
 - Do not enable GitHub Actions, cloud CI, hosted runners, or paid remote automation.
 - Do not read, copy, print, export, persist, or package Codex auth files, browser cookies, API keys, session files, GBrain databases, or local memory files.
 - Do not scan the whole home folder, whole disk, external drives, dotfiles, Codex state, or GBrain data.
+- Do not auto-wire Codex, OpenClaw, or other agents into GBrain as their main memory layer.
 - Do not use Ollama, local embeddings, or a separate embedding API key as a substitute for this repo's Codex ChatGPT web-login bridge.
 - Do not ask the user to paste secrets. If Codex is not logged in, stop and tell the user to log in with Codex on that machine.
 
