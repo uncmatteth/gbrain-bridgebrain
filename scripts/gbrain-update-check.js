@@ -13,7 +13,7 @@ function usage() {
   return [
     'Usage:',
     '  node scripts/gbrain-update-check.js check [--json] [--no-write-state] [--state-file <path>]',
-    '  node scripts/gbrain-update-check.js apply [--json] [--force] [--allow-unhealthy-before] [--state-file <path>]',
+    '  node scripts/gbrain-update-check.js apply [--json] [--force] [--allow-unhealthy-before] [--full-data-backup] [--state-file <path>]',
     '',
     'Environment:',
     '  GBRAIN_BIN              GBrain command path (default: gbrain)',
@@ -21,6 +21,7 @@ function usage() {
     '  NPM_BIN                 npm command path (default: npm)',
     '  GBRAIN_UPSTREAM_REPO    upstream git repo (default: garrytan/gbrain)',
     '  GBRAIN_BACKUP_DIR       backup directory outside this repo',
+    '  BRIDGEBRAIN_UPDATE_FULL_DATA_BACKUP=1  opt into copying .gbrain data outside this repo',
   ].join('\n');
 }
 
@@ -32,6 +33,7 @@ function parseArgs(argv) {
     json: false,
     force: false,
     allowUnhealthyBefore: process.env.BRIDGEBRAIN_UPDATE_ALLOW_UNHEALTHY_BEFORE === '1',
+    fullDataBackup: process.env.BRIDGEBRAIN_UPDATE_FULL_DATA_BACKUP === '1',
     writeState: command === 'check',
     stateFile: process.env.GBRAIN_UPDATE_STATE_FILE || null,
   };
@@ -44,6 +46,8 @@ function parseArgs(argv) {
       opts.force = true;
     } else if (arg === '--allow-unhealthy-before') {
       opts.allowUnhealthyBefore = true;
+    } else if (arg === '--full-data-backup') {
+      opts.fullDataBackup = true;
     } else if (arg === '--no-write-state') {
       opts.writeState = false;
     } else if (arg === '--write-state') {
@@ -344,7 +348,72 @@ function backupFilter(sourceRoot, candidate) {
   return true;
 }
 
-function createBackup(meta) {
+function isSecretKey(key) {
+  return /token|secret|password|cookie|api[_-]?key|authorization|credential|bearer|client[_-]?secret|service[_-]?role|private[_-]?key|access[_-]?key|jwt|pat/i.test(String(key));
+}
+
+function redactString(value) {
+  return String(value)
+    .replace(/\/v1\/t\/[^/\s?#]+/g, '/v1/t/<redacted>')
+    .replace(/([?&][^=&#?\s]*(?:token|secret|password|cookie|api[_-]?key|authorization|credential|bearer|client[_-]?secret)[^=&#?\s]*=)[^&#\s]+/gi, '$1<redacted>')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer <redacted>')
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)([^/@\s]+)@/gi, '$1<redacted>@');
+}
+
+function redactConfig(value, key = '') {
+  if (isSecretKey(key)) return '<redacted>';
+  if (Array.isArray(value)) return value.map((entry) => redactConfig(entry, key));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([childKey, childValue]) => {
+      return [childKey, redactConfig(childValue, childKey)];
+    }));
+  }
+  if (typeof value === 'string') return redactString(value);
+  return value;
+}
+
+function safeConfigSummary(config) {
+  const summary = {};
+  for (const key of ['embedding_model', 'embedding_dimensions', 'search_embedding_column']) {
+    if (Object.prototype.hasOwnProperty.call(config, key)) {
+      summary[key] = config[key];
+    }
+  }
+  if (config.provider_base_urls && typeof config.provider_base_urls === 'object') {
+    summary.provider_base_urls = redactConfig(config.provider_base_urls, 'provider_base_urls');
+  }
+  return summary;
+}
+
+function writeMetadataBackup(sourceDir, backupDir, stateFile) {
+  const files = [];
+  const configFile = path.join(sourceDir, 'config.json');
+  if (fs.existsSync(configFile)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+      fs.writeFileSync(
+        path.join(backupDir, 'config.redacted.json'),
+        `${JSON.stringify(safeConfigSummary(parsed), null, 2)}\n`,
+        { mode: 0o600 },
+      );
+      files.push('config.redacted.json');
+    } catch (err) {
+      fs.writeFileSync(
+        path.join(backupDir, 'config.redacted.error.txt'),
+        'Could not parse config.json for redacted backup. Raw config was not copied.\n',
+        { mode: 0o600 },
+      );
+      files.push('config.redacted.error.txt');
+    }
+  }
+  if (stateFile && fs.existsSync(stateFile)) {
+    fs.copyFileSync(stateFile, path.join(backupDir, 'update-state-before.json'));
+    files.push('update-state-before.json');
+  }
+  return files;
+}
+
+function createBackup(meta, opts = {}) {
   const sourceDir = gbrainDataDir();
   const backupBase = path.resolve(process.env.GBRAIN_BACKUP_DIR || defaultBackupDir());
   assertOutsideRepo('backup directory', backupBase);
@@ -353,8 +422,9 @@ function createBackup(meta) {
   const snapshotDir = path.join(backupDir, 'gbrain-home-snapshot');
   fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
 
+  const metadataFiles = writeMetadataBackup(sourceDir, backupDir, opts.stateFile);
   let snapshotCopied = false;
-  if (fs.existsSync(sourceDir)) {
+  if (opts.fullDataBackup && fs.existsSync(sourceDir)) {
     fs.cpSync(sourceDir, snapshotDir, {
       recursive: true,
       force: false,
@@ -369,18 +439,28 @@ function createBackup(meta) {
     purpose: 'BridgeBrain guarded GBrain update backup',
     gbrain_parent_dir: gbrainParentDir(),
     gbrain_data_dir: sourceDir,
+    backup_scope: opts.fullDataBackup ? 'full-private-gbrain-home' : 'metadata-redacted-only',
+    full_data_backup: !!opts.fullDataBackup,
+    metadata_files: metadataFiles,
     snapshot_copied: snapshotCopied,
+    snapshot_note: opts.fullDataBackup
+      ? 'Full .gbrain snapshot was explicitly requested. Keep this backup private.'
+      : 'Default backup avoids copying GBrain databases, local memory, and raw provider tokens.',
     ...meta,
   };
   fs.writeFileSync(path.join(backupDir, 'backup-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
   return {
     backupDir,
+    backupScope: manifest.backup_scope,
+    fullDataBackup: manifest.full_data_backup,
+    metadataFiles,
     snapshotCopied,
   };
 }
 
 function applyUpdate(opts) {
   const steps = [];
+  let backup = null;
   const gbrainBin = process.env.GBRAIN_BIN || 'gbrain';
   const npmBin = process.env.NPM_BIN || 'npm';
   const patchScript = path.resolve(process.env.BRIDGEBRAIN_UPDATE_PATCH_SCRIPT || path.join(root, 'scripts', 'patch-gbrain-litellm.js'));
@@ -390,54 +470,70 @@ function applyUpdate(opts) {
     throw new Error('local BridgeBrain state says this upstream commit was already applied. Use --force only after review.');
   }
 
-  const versionBefore = report.gbrainVersion;
-  const preDoctor = runDoctorGate('pre-upgrade gbrain doctor', { allowUnhealthy: opts.allowUnhealthyBefore });
-  steps.push({ label: 'pre-upgrade gbrain doctor', status: preDoctor.healthy ? 'ok' : 'allowed-unhealthy', doctor: preDoctor });
+  try {
+    const versionBefore = report.gbrainVersion;
+    const preDoctor = runDoctorGate('pre-upgrade gbrain doctor', { allowUnhealthy: opts.allowUnhealthyBefore });
+    steps.push({ label: 'pre-upgrade gbrain doctor', status: preDoctor.healthy ? 'ok' : 'allowed-unhealthy', doctor: preDoctor });
 
-  runRepoStep('pre-upgrade adapter tests', npmBin, ['test'], 120_000, opts, steps);
-  runRepoStep('pre-upgrade package guard', npmBin, ['run', 'package:guard'], 120_000, opts, steps);
+    runRepoStep('pre-upgrade adapter tests', npmBin, ['test'], 120_000, opts, steps);
+    runRepoStep('pre-upgrade package guard', npmBin, ['run', 'package:guard'], 120_000, opts, steps);
 
-  const backup = createBackup({
-    gbrain_version_before: versionBefore,
-    upstream_repo: report.upstreamRepo,
-    upstream_head: report.upstreamHead,
-  });
-  steps.push({ label: 'local private backup', status: 'ok', backupDir: backup.backupDir, snapshotCopied: backup.snapshotCopied });
+    const stateFile = path.resolve(opts.stateFile || defaultStateFile());
+    backup = createBackup({
+      gbrain_version_before: versionBefore,
+      upstream_repo: report.upstreamRepo,
+      upstream_head: report.upstreamHead,
+    }, {
+      fullDataBackup: opts.fullDataBackup,
+      stateFile,
+    });
+    steps.push({
+      label: 'local update backup',
+      status: 'ok',
+      backupDir: backup.backupDir,
+      backupScope: backup.backupScope,
+      snapshotCopied: backup.snapshotCopied,
+    });
 
-  runRepoStep('gbrain upgrade', gbrainBin, ['upgrade'], 600_000, opts, steps);
-  runRepoStep('reapply BridgeBrain LiteLLM patch', process.execPath, [patchScript], 120_000, opts, steps);
+    runRepoStep('gbrain upgrade', gbrainBin, ['upgrade'], 600_000, opts, steps);
+    runRepoStep('reapply BridgeBrain LiteLLM patch', process.execPath, [patchScript], 120_000, opts, steps);
 
-  const postDoctor = runDoctorGate('post-upgrade gbrain doctor', { allowUnhealthy: false });
-  steps.push({ label: 'post-upgrade gbrain doctor', status: 'ok', doctor: postDoctor });
+    const postDoctor = runDoctorGate('post-upgrade gbrain doctor', { allowUnhealthy: false });
+    steps.push({ label: 'post-upgrade gbrain doctor', status: 'ok', doctor: postDoctor });
 
-  runRepoStep('post-upgrade repo check', npmBin, ['run', 'check'], 300_000, opts, steps);
+    runRepoStep('post-upgrade repo check', npmBin, ['run', 'check'], 300_000, opts, steps);
 
-  const versionAfter = readGbrainVersion(gbrainBin).version;
-  const stateFile = path.resolve(opts.stateFile || defaultStateFile());
-  const state = readState(stateFile);
-  writeJsonAtomic(stateFile, {
-    ...state,
-    last_checked_at: new Date().toISOString(),
-    last_applied_at: new Date().toISOString(),
-    last_seen_upstream_repo: report.upstreamRepo,
-    last_seen_upstream_head: report.upstreamHead,
-    last_applied_upstream_head: report.upstreamHead,
-    last_seen_gbrain_version: versionAfter,
-    last_applied_gbrain_version: versionAfter,
-    last_backup_dir: backup.backupDir,
-  });
+    const versionAfter = readGbrainVersion(gbrainBin).version;
+    const state = readState(stateFile);
+    writeJsonAtomic(stateFile, {
+      ...state,
+      last_checked_at: new Date().toISOString(),
+      last_applied_at: new Date().toISOString(),
+      last_seen_upstream_repo: report.upstreamRepo,
+      last_seen_upstream_head: report.upstreamHead,
+      last_applied_upstream_head: report.upstreamHead,
+      last_seen_gbrain_version: versionAfter,
+      last_applied_gbrain_version: versionAfter,
+      last_backup_dir: backup.backupDir,
+      last_backup_scope: backup.backupScope,
+    });
 
-  return {
-    command: 'apply',
-    status: 'applied',
-    upstreamRepo: report.upstreamRepo,
-    upstreamHead: report.upstreamHead,
-    versionBefore,
-    versionAfter,
-    backup,
-    stateFile,
-    steps,
-  };
+    return {
+      command: 'apply',
+      status: 'applied',
+      upstreamRepo: report.upstreamRepo,
+      upstreamHead: report.upstreamHead,
+      versionBefore,
+      versionAfter,
+      backup,
+      stateFile,
+      steps,
+    };
+  } catch (err) {
+    if (backup) err.backup = backup;
+    err.steps = steps;
+    throw err;
+  }
 }
 
 function printCheck(report) {
@@ -479,9 +575,15 @@ function main() {
     }
   } catch (err) {
     if (opts && opts.json) {
-      process.stdout.write(`${JSON.stringify({ status: 'failed', error: err.message }, null, 2)}\n`);
+      const failure = { status: 'failed', error: err.message };
+      if (err.backup) failure.backup = err.backup;
+      if (err.steps) failure.steps = err.steps;
+      process.stdout.write(`${JSON.stringify(failure, null, 2)}\n`);
     } else {
       process.stderr.write(`${err.message}\n`);
+      if (err.backup) {
+        process.stderr.write(`Backup: ${err.backup.backupDir}\n`);
+      }
       process.stderr.write(`${usage()}\n`);
     }
     process.exit(1);

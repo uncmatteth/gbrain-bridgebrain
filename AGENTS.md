@@ -94,7 +94,7 @@ Do not apply an update unless the user explicitly asks:
 npm run gbrain:update:apply
 ```
 
-The apply command must keep all gates intact: pre-upgrade `gbrain doctor --json`, BridgeBrain tests, package guard, local backup outside this repo, `gbrain upgrade`, BridgeBrain patch reapply, post-upgrade doctor, and final `npm run check`. If any gate fails, stop and report the failure plus the backup path if one was created.
+The apply command must keep all gates intact: pre-upgrade `gbrain doctor --json`, BridgeBrain tests, package guard, local backup outside this repo, `gbrain upgrade`, BridgeBrain patch reapply, post-upgrade doctor, and final `npm run check`. The default backup is metadata-only with a redacted config summary; it must not copy GBrain databases, local memory files, raw provider tokens, or unknown config fields. Use `npm run gbrain:update:apply -- --full-data-backup` only when the user explicitly accepts a full private `.gbrain` snapshot outside the repo. If any gate fails, stop and report the failure plus the backup path if one was created.
 
 ## Machine Memory
 

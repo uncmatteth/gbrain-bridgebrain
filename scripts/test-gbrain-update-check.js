@@ -35,6 +35,23 @@ function run(args, env) {
   }
 }
 
+function runFailure(args, env) {
+  const result = spawnSync(process.execPath, [updater, ...args], {
+    cwd: root,
+    env,
+    encoding: 'utf8',
+    timeout: 120_000,
+  });
+  if (result.status === 0) {
+    fail(`updater unexpectedly passed: ${args.join(' ')}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+  }
+  try {
+    return JSON.parse(result.stdout);
+  } catch (err) {
+    fail(`could not parse updater failure JSON: ${err.message}\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`);
+  }
+}
+
 if (process.platform === 'win32') {
   console.log('gbrain update checker smoke skipped on Windows; bash fixtures are Unix-only.');
   process.exit(0);
@@ -54,7 +71,31 @@ try {
   fs.mkdirSync(bin, { recursive: true });
   fs.mkdirSync(home, { recursive: true });
   fs.mkdirSync(gbrainData, { recursive: true });
-  fs.writeFileSync(path.join(gbrainData, 'config.json'), '{"embedding_model":"fixture"}\n');
+  const configFile = path.join(gbrainData, 'config.json');
+  fs.writeFileSync(
+    configFile,
+    JSON.stringify({
+      embedding_model: 'fixture',
+      provider_base_urls: {
+        litellm: 'http://127.0.0.1:4127/v1/t/raw-local-token',
+        other: ['https://user:pass', 'host.invalid/embed?api_key=query-api-key&refresh_token=refresh-token&id_token=id-token&client_secret=client-secret'].join('@'),
+        bareUserinfo: ['https://tokenonly', 'host.invalid/v1'].join('@'),
+      },
+      api_key: 'raw-api-key',
+      providers: {
+        openai: {
+          api_key: 'nested-api-key',
+          headers: {
+            Authorization: 'Bearer nested-bearer-token',
+          },
+        },
+      },
+      storage: {
+        serviceRoleKey: 'supabase-service-role-key',
+      },
+    }, null, 2),
+  );
+  fs.writeFileSync(path.join(gbrainData, 'brain.pglite'), 'private brain fixture\n');
 
   writeExecutable(path.join(bin, 'fake-gbrain'), `#!/usr/bin/env bash
 set -euo pipefail
@@ -99,6 +140,10 @@ exit 2
   writeExecutable(path.join(bin, 'fake-npm'), `#!/usr/bin/env bash
 set -euo pipefail
 printf 'npm %s\\n' "$*" >> "$FAKE_LOG"
+if [[ "$*" == "run check" && -n "\${FAKE_FAIL_FINAL_CHECK:-}" ]]; then
+  echo "final check failed by fixture" >&2
+  exit 9
+fi
 exit 0
 `);
 
@@ -152,17 +197,67 @@ exit 0
   });
   if (applied.status !== 'applied') fail('apply did not report applied status');
   if (!applied.backup || !applied.backup.backupDir) fail('apply did not create backup metadata');
+  if (applied.backup.backupScope !== 'metadata-redacted-only') fail('default backup must be metadata-redacted-only');
+  if (applied.backup.snapshotCopied) fail('default backup must not copy .gbrain data snapshot');
   if (!fs.existsSync(path.join(applied.backup.backupDir, 'backup-manifest.json'))) {
     fail('apply did not write backup manifest');
   }
-  if (!fs.existsSync(path.join(applied.backup.backupDir, 'gbrain-home-snapshot', 'config.json'))) {
-    fail('apply did not snapshot local GBrain home');
+  const redactedConfigPath = path.join(applied.backup.backupDir, 'config.redacted.json');
+  if (!fs.existsSync(redactedConfigPath)) {
+    fail('apply did not write redacted config backup');
+  }
+  const redactedConfig = fs.readFileSync(redactedConfigPath, 'utf8');
+  for (const secret of [
+    'raw-local-token',
+    'raw-api-key',
+    'query-api-key',
+    'refresh-token',
+    'id-token',
+    'client-secret',
+    'nested-api-key',
+    'nested-bearer-token',
+    'user:pass',
+    'tokenonly',
+    'supabase-service-role-key',
+  ]) {
+    if (redactedConfig.includes(secret)) fail(`redacted config backup leaked local secret: ${secret}`);
+  }
+  if (!redactedConfig.includes('/v1/t/<redacted>') || !redactedConfig.includes('<redacted>')) {
+    fail('redacted config backup did not include expected redaction markers');
+  }
+  if (fs.existsSync(path.join(applied.backup.backupDir, 'gbrain-home-snapshot'))) {
+    fail('default backup created full .gbrain snapshot');
   }
 
   const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
   if (state.last_applied_upstream_head !== secondHead) fail('state did not record applied upstream head');
+  if (state.last_backup_scope !== 'metadata-redacted-only') fail('state did not record backup scope');
   if (!state.last_backup_dir || !state.last_backup_dir.includes('bridgebrain-gbrain-update-')) {
     fail('state did not record backup directory');
+  }
+
+  fs.writeFileSync(configFile, '{"api_key": raw-malformed-token\n');
+  const malformedBackup = run(['apply', '--json', '--force', '--state-file', stateFile], {
+    ...env,
+    GBRAIN_FAKE_HEAD: secondHead,
+  });
+  const malformedErrorPath = path.join(malformedBackup.backup.backupDir, 'config.redacted.error.txt');
+  if (!fs.existsSync(malformedErrorPath)) fail('malformed config backup did not write generic parse error');
+  const malformedError = fs.readFileSync(malformedErrorPath, 'utf8');
+  if (malformedError.includes('raw-malformed-token') || malformedError.includes('api_key')) {
+    fail('malformed config backup leaked raw parser context');
+  }
+
+  const failedApply = runFailure(['apply', '--json', '--force', '--state-file', stateFile], {
+    ...env,
+    GBRAIN_FAKE_HEAD: secondHead,
+    FAKE_FAIL_FINAL_CHECK: '1',
+  });
+  if (!failedApply.backup || !failedApply.backup.backupDir) {
+    fail('failed apply did not report backup path');
+  }
+  if (!failedApply.steps || !failedApply.steps.some((step) => step.label === 'local update backup')) {
+    fail('failed apply did not report steps through backup');
   }
 
   const log = fs.readFileSync(logFile, 'utf8');
@@ -183,6 +278,8 @@ exit 0
     "['upgrade']",
     "['run', 'check']",
     'assertOutsideRepo',
+    '--full-data-backup',
+    'metadata-redacted-only',
   ]) {
     if (!source.includes(expected)) fail(`updater missing safety surface: ${expected}`);
   }

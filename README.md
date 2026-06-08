@@ -187,6 +187,12 @@ The apply command is intentionally strict:
 - runs `gbrain doctor --json` again;
 - runs the full repo check after the upgrade.
 
+By default, the backup is metadata-only: manifest plus a redacted GBrain config summary. It does not copy the GBrain database, local memory files, raw provider tokens, or unknown config fields. To make a full private `.gbrain` data snapshot outside the repo, pass `-- --full-data-backup` only after the user accepts that local data-copying scope:
+
+```bash
+npm run gbrain:update:apply -- --full-data-backup
+```
+
 If doctor or tests fail, the upgrade stops. If a post-upgrade gate fails, the command prints the backup path and stops instead of silently rolling back a live local brain.
 
 ## Compatibility Mode
