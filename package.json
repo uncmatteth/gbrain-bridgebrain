@@ -1,7 +1,7 @@
 {
   "name": "gbrain-bridgebrain",
   "version": "0.1.0",
-  "private": false,
+  "private": true,
   "description": "GBrain embeddings through your own Codex ChatGPT web-login bridge. No Ollama, no GPU, no extra embedding API key. Benchmark it, break it, prove it.",
   "type": "commonjs",
   "bin": {
@@ -11,8 +11,25 @@
     "check": "bash scripts/check.sh",
     "test": "node scripts/test-adapter.js",
     "eval": "node scripts/eval.js",
-    "hygiene": "bash scripts/hygiene-scan.sh"
+    "hygiene": "bash scripts/hygiene-scan.sh",
+    "package:guard": "node scripts/package-guard.js",
+    "prepack": "node scripts/package-guard.js",
+    "prepublishOnly": "node scripts/package-guard.js --publish"
   },
+  "files": [
+    "bridge-skill/",
+    "evals/",
+    "launchd/",
+    "scripts/",
+    "src/",
+    "systemd/",
+    "CONTRIBUTING.md",
+    "EVALS.md",
+    "LICENSE",
+    "README.md",
+    "SECURITY.md",
+    "TROUBLESHOOTING.md"
+  ],
   "engines": {
     "node": ">=18"
   },

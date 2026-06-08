@@ -38,6 +38,9 @@ node scripts/eval.js
 echo "Live eval auth smoke..."
 node scripts/test-eval-auth.js
 
+echo "Package guard..."
+node scripts/package-guard.js
+
 echo "Hygiene..."
 scripts/hygiene-scan.sh
 

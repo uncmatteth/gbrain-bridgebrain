@@ -1,0 +1,12 @@
+[Unit]
+Description=Run GBrain machine-memory sync on a timer
+
+[Timer]
+OnActiveSec=@INTERVAL_SECONDS@s
+OnUnitActiveSec=@INTERVAL_SECONDS@s
+RandomizedDelaySec=60
+Persistent=true
+Unit=gbrain-machine-sync.service
+
+[Install]
+WantedBy=timers.target

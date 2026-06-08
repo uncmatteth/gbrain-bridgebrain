@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.gbrain.bridgebrain.machine-sync</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>@NODE_BIN@</string>
+    <string>@CODEX_HOME@/services/gbrain-machine-memory/setup-machine-memory.js</string>
+    <string>sync-once</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>StartInterval</key>
+  <integer>@INTERVAL_SECONDS@</integer>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>@PATH@</string>
+    <key>BRIDGEBRAIN_ENABLE_MACHINE_MEMORY</key>
+    <string>1</string>
+    <key>BRIDGEBRAIN_ALLOW_WIDE_MACHINE_MEMORY_ROOTS</key>
+    <string>@ALLOW_WIDE_ROOTS@</string>
+    <key>GBRAIN_BIN</key>
+    <string>@GBRAIN_BIN@</string>
+    <key>GBRAIN_HOME</key>
+    <string>@GBRAIN_HOME@</string>
+    <key>GBRAIN_MACHINE_ROOTS</key>
+    <string>@MACHINE_ROOTS@</string>
+    <key>GBRAIN_MACHINE_TERMINATE_SERVE</key>
+    <string>@TERMINATE_SERVE@</string>
+    <key>GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS</key>
+    <string>@SYNC_TIMEOUT_SECONDS@</string>
+  </dict>
+
+  <key>StandardOutPath</key>
+  <string>@CODEX_HOME@/services/gbrain-machine-memory/machine-sync.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>@CODEX_HOME@/services/gbrain-machine-memory/machine-sync.err.log</string>
+</dict>
+</plist>

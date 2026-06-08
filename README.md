@@ -14,6 +14,7 @@ This exists because the normal setup path is annoying as hell if you want strong
 - Explicit `compat` fallback: `chatgpt-bridge-semantic-hash-768`.
 - `mock` profile for CI and no-login tests.
 - Linux user `systemd`, macOS `launchd`, and Windows Scheduled Task installers.
+- Optional machine-memory source discovery and recurring GBrain sync.
 - GBrain LiteLLM compatibility patch with backups and hard failure if the expected upstream code changed.
 - Eval fixtures and recall/MRR scoring.
 - Hygiene checks for public repo safety.
@@ -78,6 +79,48 @@ If you use a non-default GBrain home, set `GBRAIN_HOME` to GBrain's parent direc
 
 If GBrain already has pages, the installer does not wipe the brain. It updates provider config and reports that a supported migration or reindex is needed if existing embeddings use another width.
 
+## Dry Run
+
+Use dry run before testing an installer on a real machine:
+
+```bash
+scripts/install.sh --dry-run
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\install.ps1 -DryRun
+```
+
+Dry run validates inputs and prints a redacted plan. It does not write files, patch GBrain, install services, create Scheduled Tasks, run verification, register sources, or sync anything.
+
+## Machine Memory
+
+BridgeBrain can also install a recurring GBrain source sync job. This is explicit because it sends syncable repo content through the configured embedding path.
+
+Linux or macOS:
+
+```bash
+BRIDGEBRAIN_ENABLE_MACHINE_MEMORY=1 \
+GBRAIN_MACHINE_ROOTS="$HOME/Documents/GitHub:$HOME/Projects" \
+GBRAIN_MACHINE_TERMINATE_SERVE=none \
+scripts/install.sh --machine-memory
+```
+
+Windows PowerShell:
+
+```powershell
+$env:BRIDGEBRAIN_ENABLE_MACHINE_MEMORY="1"
+$env:GBRAIN_MACHINE_ROOTS="$HOME\Documents\GitHub;$HOME\source\repos"
+$env:GBRAIN_MACHINE_TERMINATE_SERVE="none"
+.\scripts\install.ps1 -MachineMemory
+```
+
+Use `--machine-memory-sync-now` or `-MachineMemorySyncNow` to run the first sync immediately. The runner discovers git repositories under explicit `GBRAIN_MACHINE_ROOTS`, registers missing GBrain sources, confirms active non-archived sources before sync, and syncs each matching source serially with `gbrain sync --source <id> --strategy auto --yes`. It skips hidden/vendor directories during discovery, has no default roots, and blocks whole-home/root scans unless `BRIDGEBRAIN_ALLOW_WIDE_MACHINE_MEMORY_ROOTS=1` is set after review.
+
+On PGLite, long-running stdio `gbrain serve` processes can hold the database lock. The default is `GBRAIN_MACHINE_TERMINATE_SERVE=none`. On Linux/macOS, set `GBRAIN_MACHINE_TERMINATE_SERVE=all` only on machines where scheduled sync is allowed to interrupt active GBrain MCP sessions; Codex can respawn MCP after sync. Windows does not support that mode; leave it `none` and stop `gbrain serve` manually before scheduled sync if needed.
+
 ## Compatibility Mode
 
 Default is 1536 dimensions:
@@ -124,10 +167,19 @@ Repo-local checks:
 npm test
 npm run eval
 npm run hygiene
+npm run package:guard
 npm run check
 ```
 
 `npm test` uses mock mode and does not require ChatGPT login. Live install verification does require the local Codex ChatGPT login because that is the whole point.
+
+For release privacy checks, keep exact private strings outside the repo and scan them with:
+
+```bash
+BRIDGEBRAIN_PRIVATE_BLOCKLIST=/path/to/private-blocklist.txt npm run hygiene
+```
+
+The blocklist file is one fixed string per line. The scan reports matching files without printing the private strings back to the terminal.
 
 ## Benchmark It
 
@@ -173,18 +225,19 @@ See `SECURITY.md` for the full boundary.
 - `bridge-skill/` - bundled ChatGPT web-login bridge skill.
 - `scripts/install.sh` - Linux/macOS installer.
 - `scripts/install.ps1` - Windows installer.
+- `scripts/setup-machine-memory.js` - source discovery, source registration, and serial sync runner.
 - `scripts/verify.sh` and `scripts/verify.ps1` - install verification.
 - `scripts/patch-gbrain-litellm.js` - safe GBrain compatibility patch.
 - `scripts/test-adapter.js` - no-login adapter smoke test.
 - `scripts/test-bridge.js` - bridge stdin/no-shell-tool smoke test.
 - `scripts/eval.js` - recall/MRR eval harness.
 - `scripts/hygiene-scan.sh` - public-release hygiene scan.
-- `systemd/` and `launchd/` - user service templates.
+- `systemd/` and `launchd/` - user service and machine-sync templates.
 - `evals/` - fixture corpus and query set.
 
-## Agent Handoff
+## Agent Boundary
 
-Give an agent this repo and `AGENT_HANDOFF.md`. Tell it: do not use Ollama, do not ask for embedding keys, do not copy credentials, run the checks, and stop if the bridge or GBrain patch fails.
+Give an agent this repo plus `README.md`, `SECURITY.md`, and `CONTRIBUTING.md`. Do not put private handoffs, local paths, logs, tokens, GBrain data, Codex state, or machine scan output in this public repo.
 
 ## License
 

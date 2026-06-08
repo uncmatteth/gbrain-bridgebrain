@@ -1,0 +1,21 @@
+[Unit]
+Description=GBrain machine-memory source registration and sync
+After=default.target gbrain-chatgpt-embeddings.service
+Wants=gbrain-chatgpt-embeddings.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=@HOME@
+TimeoutStartSec=infinity
+Environment="PATH=@PATH@"
+Environment="BRIDGEBRAIN_ENABLE_MACHINE_MEMORY=1"
+Environment="BRIDGEBRAIN_ALLOW_WIDE_MACHINE_MEMORY_ROOTS=@ALLOW_WIDE_ROOTS@"
+Environment="GBRAIN_BIN=@GBRAIN_BIN@"
+Environment="GBRAIN_HOME=@GBRAIN_HOME@"
+Environment="GBRAIN_MACHINE_ROOTS=@MACHINE_ROOTS@"
+Environment="GBRAIN_MACHINE_TERMINATE_SERVE=@TERMINATE_SERVE@"
+Environment="GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS=@SYNC_TIMEOUT_SECONDS@"
+ExecStart="@NODE_BIN@" "@MACHINE_MEMORY_SCRIPT@" sync-once
+
+[Install]
+WantedBy=default.target

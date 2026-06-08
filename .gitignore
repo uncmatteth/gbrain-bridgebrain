@@ -18,6 +18,10 @@ tmp/
 .openclaw/
 .clawpatch/
 
+AGENT_HANDOFF.md
+handoff*.md
+*-handoff.md
+
 *.sqlite
 *.sqlite3
 *.db
