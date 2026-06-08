@@ -2,7 +2,9 @@
 set -euo pipefail
 
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
-GBRAIN_HOME="${GBRAIN_HOME:-$HOME/.gbrain}"
+GBRAIN_HOME_PARENT="${GBRAIN_HOME:-$HOME}"
+GBRAIN_CONFIG_DIR="${GBRAIN_HOME_PARENT%/}/.gbrain"
+CONFIG_FILE="$GBRAIN_CONFIG_DIR/config.json"
 SKILL_NAME="unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit"
 BRIDGE_SCRIPT="${BRIDGE_SCRIPT:-$CODEX_HOME/skills/$SKILL_NAME/scripts/gpt-web-login-bridge.js}"
 PORT="${GBRAIN_CHATGPT_EMBED_PORT:-4127}"
@@ -43,16 +45,24 @@ fail() {
   exit 1
 }
 
+validate_gbrain_home() {
+  [[ "$GBRAIN_HOME_PARENT" = /* ]] || fail "GBRAIN_HOME must be an absolute path when set."
+  if [[ "$GBRAIN_HOME_PARENT" == ".." || "$GBRAIN_HOME_PARENT" == "../"* || "$GBRAIN_HOME_PARENT" == *"/.."* ]]; then
+    fail "GBRAIN_HOME must not contain '..' path segments."
+  fi
+}
+
 if [[ "$PROFILE" == "compat" ]]; then
   MODEL_NAME="${GBRAIN_CHATGPT_EMBED_MODEL:-chatgpt-bridge-semantic-hash-768}"
   DIMENSIONS="${GBRAIN_CHATGPT_EMBED_DIMENSIONS:-768}"
 fi
 
+validate_gbrain_home
 command -v node >/dev/null 2>&1 || fail "node is missing"
 command -v curl >/dev/null 2>&1 || fail "curl is missing"
 
 CONFIG_BASE_URL="$(
-  node - "$GBRAIN_HOME/config.json" <<'NODE'
+  node - "$CONFIG_FILE" <<'NODE'
 const fs = require('fs');
 const file = process.argv[2];
 try {
@@ -125,7 +135,7 @@ fi
 command -v gbrain >/dev/null 2>&1 || fail "gbrain is missing"
 
 echo "Checking GBrain config..."
-node - "$GBRAIN_HOME/config.json" "$MODEL_NAME" "$DIMENSIONS" "$BASE_URL" <<'NODE'
+node - "$CONFIG_FILE" "$MODEL_NAME" "$DIMENSIONS" "$BASE_URL" <<'NODE'
 const fs = require('fs');
 const [file, model, dimsRaw, baseUrl] = process.argv.slice(2);
 const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));

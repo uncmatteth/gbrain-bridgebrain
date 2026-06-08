@@ -74,7 +74,7 @@ The installer copies the bundled bridge skill into the current user's Codex home
 
 It also generates a per-install local token. GBrain's LiteLLM base URL is written as `http://127.0.0.1:<port>/v1/t/<generated-token>`, and the service receives the matching `BRIDGEBRAIN_API_TOKEN`. Do not publish that local config or service file.
 
-If you use a non-default GBrain home, set `GBRAIN_HOME` before installing and verifying.
+If you use a non-default GBrain home, set `GBRAIN_HOME` to GBrain's parent directory before installing and verifying. The config file is `$GBRAIN_HOME/.gbrain/config.json`.
 
 If GBrain already has pages, the installer does not wipe the brain. It updates provider config and reports that a supported migration or reindex is needed if existing embeddings use another width.
 
@@ -137,11 +137,13 @@ Mock eval:
 node scripts/eval.js
 ```
 
-Live eval against a running BridgeBrain service:
+Live eval against an installed BridgeBrain service reads GBrain's configured LiteLLM base URL by default:
 
 ```bash
-BRIDGEBRAIN_EVAL_BASE_URL=http://127.0.0.1:4127/v1 node scripts/eval.js --live
+node scripts/eval.js --live
 ```
+
+You can override the target with `BRIDGEBRAIN_EVAL_BASE_URL` and pass the local token with `BRIDGEBRAIN_API_TOKEN` or `GBRAIN_CHATGPT_EMBED_TOKEN`.
 
 The eval prints recall@K and MRR. The bundled fixture is small on purpose: it proves the harness works. Bring a better corpus, submit results, and break the damn thing in public.
 

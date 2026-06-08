@@ -70,7 +70,7 @@ The installer should:
 
 If GBrain already has pages, do not reinitialize or wipe the database. Configure provider settings and report the migration/reindex requirement.
 
-If `GBRAIN_HOME` is set, all installer and verifier config-path work must use that directory instead of assuming the default GBrain home.
+If `GBRAIN_HOME` is set, treat it as GBrain's parent directory. Installer and verifier config-path work must use `$GBRAIN_HOME/.gbrain/config.json`; with no override, use `$HOME/.gbrain/config.json`.
 
 ## Verify
 
@@ -122,7 +122,7 @@ node scripts/eval.js
 Live:
 
 ```bash
-BRIDGEBRAIN_EVAL_BASE_URL=http://127.0.0.1:4127/v1 node scripts/eval.js --live
+node scripts/eval.js --live
 ```
 
 Do not market scores as winning anything unless the score, corpus, query set, and comparison are included.

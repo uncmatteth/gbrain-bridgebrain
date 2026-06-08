@@ -21,8 +21,10 @@ Output includes:
 Run against an installed BridgeBrain service:
 
 ```bash
-BRIDGEBRAIN_EVAL_BASE_URL=http://127.0.0.1:4127/v1 node scripts/eval.js --live
+node scripts/eval.js --live
 ```
+
+Live mode reads GBrain's configured LiteLLM base URL by default. Override with `BRIDGEBRAIN_EVAL_BASE_URL` and pass bearer auth with `BRIDGEBRAIN_API_TOKEN` or `GBRAIN_CHATGPT_EMBED_TOKEN` when needed.
 
 Live mode sends fixture/query text through the authenticated provider account. Review the fixture data before running on private corpora.
 

@@ -6,7 +6,8 @@ param(
 $ErrorActionPreference = "Stop"
 
 $CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME ".codex" }
-$GbrainHome = if ($env:GBRAIN_HOME) { $env:GBRAIN_HOME } else { Join-Path $HOME ".gbrain" }
+$GbrainHomeParent = if ($env:GBRAIN_HOME) { $env:GBRAIN_HOME } else { $HOME }
+$GbrainConfigDir = Join-Path $GbrainHomeParent ".gbrain"
 $SkillName = "unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit"
 $BridgeScript = if ($env:BRIDGE_SCRIPT) { $env:BRIDGE_SCRIPT } else { Join-Path $CodexHome "skills\$SkillName\scripts\gpt-web-login-bridge.js" }
 $Port = if ($env:GBRAIN_CHATGPT_EMBED_PORT) { $env:GBRAIN_CHATGPT_EMBED_PORT } else { "4127" }
@@ -26,15 +27,24 @@ function Fail($Message) {
   exit 1
 }
 
+function Test-GBrainHome($PathValue) {
+  $Root = [System.IO.Path]::GetPathRoot($PathValue)
+  if (-not $Root -or $PathValue -match '^[A-Za-z]:[^\\/]') { Fail "GBRAIN_HOME must be an absolute path when set." }
+  $Segments = $PathValue -split '[\\/]+'
+  if ($Segments -contains '..') { Fail "GBRAIN_HOME must not contain '..' path segments." }
+}
+
+Test-GBrainHome $GbrainHomeParent
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Fail "node is missing" }
 
-$ConfigFile = Join-Path $GbrainHome "config.json"
+$ConfigFile = Join-Path $GbrainConfigDir "config.json"
 if (Test-Path $ConfigFile) {
   $ConfigForBaseUrl = Get-Content $ConfigFile -Raw | ConvertFrom-Json
   if ($ConfigForBaseUrl.provider_base_urls.litellm) {
     $BaseUrl = $ConfigForBaseUrl.provider_base_urls.litellm
   }
-} elseif ($Token) {
+}
+if ($BaseUrl -eq "http://127.0.0.1:$Port/v1" -and $Token) {
   $BaseUrl = "http://127.0.0.1:$Port/v1/t/$Token"
 }
 

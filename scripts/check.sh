@@ -35,6 +35,9 @@ node scripts/test-installers.js
 echo "Mock eval..."
 node scripts/eval.js
 
+echo "Live eval auth smoke..."
+node scripts/test-eval-auth.js
+
 echo "Hygiene..."
 scripts/hygiene-scan.sh
 

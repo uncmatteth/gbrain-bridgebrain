@@ -10,32 +10,62 @@ const root = path.resolve(__dirname, '..');
 const args = new Set(process.argv.slice(2));
 const live = args.has('--live');
 const port = Number(process.env.BRIDGEBRAIN_EVAL_PORT || 4138);
-const baseUrl = process.env.BRIDGEBRAIN_EVAL_BASE_URL || `http://127.0.0.1:${port}/v1`;
 const topK = Number(process.env.BRIDGEBRAIN_EVAL_TOP_K || 3);
 const minRecall = process.env.BRIDGEBRAIN_EVAL_MIN_RECALL
   ? Number(process.env.BRIDGEBRAIN_EVAL_MIN_RECALL)
   : null;
+const authToken = process.env.BRIDGEBRAIN_API_TOKEN || process.env.GBRAIN_CHATGPT_EMBED_TOKEN || '';
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
+function gbrainConfigFile() {
+  const homeParent = process.env.GBRAIN_HOME || os.homedir();
+  return path.join(homeParent, '.gbrain', 'config.json');
+}
+
+function installedBaseUrl() {
+  try {
+    return readJson(gbrainConfigFile()).provider_base_urls?.litellm || '';
+  } catch {
+    return '';
+  }
+}
+
+function defaultBaseUrl() {
+  if (live) {
+    const configured = installedBaseUrl();
+    if (configured) return configured;
+  }
+  if (authToken) return `http://127.0.0.1:${port}/v1/t/${encodeURIComponent(authToken)}`;
+  return `http://127.0.0.1:${port}/v1`;
+}
+
+function redactBaseUrl(url) {
+  return url.replace(/\/v1\/t\/[^/]+/, '/v1/t/<redacted>');
+}
+
+const baseUrl = process.env.BRIDGEBRAIN_EVAL_BASE_URL || defaultBaseUrl();
+
 function requestJson(url, body) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const payload = body ? JSON.stringify(body) : '';
+    const headers = payload
+      ? {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(payload),
+        }
+      : {};
+    if (authToken) headers.authorization = `Bearer ${authToken}`;
     const req = http.request(
       {
         method: body ? 'POST' : 'GET',
         hostname: parsed.hostname,
         port: parsed.port,
         path: `${parsed.pathname}${parsed.search}`,
-        headers: payload
-          ? {
-              'content-type': 'application/json',
-              'content-length': Buffer.byteLength(payload),
-            }
-          : {},
+        headers,
       },
       (res) => {
         let data = '';
@@ -142,7 +172,7 @@ async function main() {
     const mrr = rows.reduce((sum, row) => sum + row.reciprocal_rank, 0) / rows.length;
     const summary = {
       mode: live ? 'live' : 'mock',
-      base_url: baseUrl,
+      base_url: redactBaseUrl(baseUrl),
       corpus_size: corpus.length,
       query_count: queries.length,
       top_k: topK,

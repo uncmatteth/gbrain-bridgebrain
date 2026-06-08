@@ -42,6 +42,25 @@ function Fail($Message) {
   exit 1
 }
 
+function Test-GBrainHome($PathValue) {
+  $Root = [System.IO.Path]::GetPathRoot($PathValue)
+  if (-not $Root -or $PathValue -match '^[A-Za-z]:[^\\/]') { Fail "GBRAIN_HOME must be an absolute path when set." }
+  $Segments = $PathValue -split '[\\/]+'
+  if ($Segments -contains '..') { Fail "GBRAIN_HOME must not contain '..' path segments." }
+}
+
+function Protect-LocalSecretPath($PathValue) {
+  try {
+    if ($env:OS -ne "Windows_NT" -and -not $IsWindows) { return }
+    $Icacls = (Get-Command icacls -ErrorAction SilentlyContinue).Source
+    if (-not $Icacls) { return }
+    $Sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    & $Icacls $PathValue /inheritance:r /grant:r "*${Sid}:F" "*S-1-5-18:F" "*S-1-5-32-544:F" | Out-Null
+  } catch {
+    Write-Warning "Could not restrict ACL on ${PathValue}: $($_.Exception.Message)"
+  }
+}
+
 if (-not $NodeBin) { Fail "Node.js is required. Install Node or set NODE_BIN." }
 if (-not $CodexBin) { Fail "Codex CLI is required and must already be logged in with ChatGPT auth." }
 if (-not $GbrainBin) {
@@ -67,15 +86,19 @@ $env:GPT_WEB_LOGIN_CWD = $HOME
 & $NodeBin (Join-Path $SkillDest "scripts\gpt-web-login-bridge.js") status
 & $NodeBin (Join-Path $Root "scripts\patch-gbrain-litellm.js")
 
-$GbrainHome = if ($env:GBRAIN_HOME) { $env:GBRAIN_HOME } else { Join-Path $HOME ".gbrain" }
-$ConfigFile = Join-Path $GbrainHome "config.json"
-New-Item -ItemType Directory -Force -Path $GbrainHome | Out-Null
+$GbrainHomeParent = if ($env:GBRAIN_HOME) { $env:GBRAIN_HOME } else { $HOME }
+Test-GBrainHome $GbrainHomeParent
+$GbrainConfigDir = Join-Path $GbrainHomeParent ".gbrain"
+$ConfigFile = Join-Path $GbrainConfigDir "config.json"
+New-Item -ItemType Directory -Force -Path $GbrainConfigDir | Out-Null
 $ConfigExisted = Test-Path $ConfigFile
 & $NodeBin (Join-Path $Root "scripts\configure-gbrain.js") $ConfigFile $ModelName $Dimensions $BaseUrl
 if (-not $ConfigExisted) {
-  & $GbrainBin init --pglite --no-embedding
+  & $GbrainBin init --pglite --embedding-model "litellm:$ModelName" --embedding-dimensions $Dimensions --skip-embed-check
   & $NodeBin (Join-Path $Root "scripts\configure-gbrain.js") $ConfigFile $ModelName $Dimensions $BaseUrl
 }
+Protect-LocalSecretPath $GbrainConfigDir
+Protect-LocalSecretPath $ConfigFile
 
 if (-not $SkipService) {
   $Runner = Join-Path $ServiceHome "run-bridgebrain.ps1"
@@ -93,6 +116,7 @@ if (-not $SkipService) {
 `$env:GPT_WEB_LOGIN_CWD = "$($HOME.Replace("\", "\\"))"
 & "$($NodeBin.Replace("\", "\\"))" "$((Join-Path $ServiceHome "server.js").Replace("\", "\\"))"
 "@ | Set-Content -Encoding UTF8 $Runner
+  Protect-LocalSecretPath $Runner
 
   $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$Runner`""
   $Trigger = New-ScheduledTaskTrigger -AtLogOn

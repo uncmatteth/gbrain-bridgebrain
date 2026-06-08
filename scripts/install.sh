@@ -4,7 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OS_NAME="$(uname -s)"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
-GBRAIN_HOME="${GBRAIN_HOME:-$HOME/.gbrain}"
+GBRAIN_HOME_PARENT="${GBRAIN_HOME:-$HOME}"
+GBRAIN_CONFIG_DIR="${GBRAIN_HOME_PARENT%/}/.gbrain"
 SERVICE_HOME="$CODEX_HOME/services/gbrain-chatgpt-embeddings"
 SKILL_NAME="unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit"
 SKILL_DEST="$CODEX_HOME/skills/$SKILL_NAME"
@@ -65,6 +66,13 @@ need_cmd() {
   [[ -n "$value" ]] || fail "$name is required."
 }
 
+validate_gbrain_home() {
+  [[ "$GBRAIN_HOME_PARENT" = /* ]] || fail "GBRAIN_HOME must be an absolute path when set."
+  if [[ "$GBRAIN_HOME_PARENT" == ".." || "$GBRAIN_HOME_PARENT" == "../"* || "$GBRAIN_HOME_PARENT" == *"/.."* ]]; then
+    fail "GBRAIN_HOME must not contain '..' path segments."
+  fi
+}
+
 sed_escape() {
   printf '%s' "$1" | sed 's/[&|\\]/\\&/g'
 }
@@ -81,6 +89,7 @@ fi
 
 need_cmd node "$NODE_BIN"
 need_cmd codex "$CODEX_BIN"
+validate_gbrain_home
 
 if [[ -z "$TOKEN" ]]; then
   TOKEN="$("$NODE_BIN" -e "console.log(require('crypto').randomBytes(32).toString('hex'))")"
@@ -111,15 +120,18 @@ GPT_WEB_LOGIN_CODEX_BIN="$CODEX_BIN" GPT_WEB_LOGIN_CWD="$HOME" \
   "$NODE_BIN" "$SKILL_DEST/scripts/gpt-web-login-bridge.js" status
 "$NODE_BIN" "$ROOT/scripts/patch-gbrain-litellm.js"
 
-mkdir -p "$GBRAIN_HOME"
-CONFIG_FILE="$GBRAIN_HOME/config.json"
+mkdir -p "$GBRAIN_CONFIG_DIR"
+CONFIG_FILE="$GBRAIN_CONFIG_DIR/config.json"
 CONFIG_EXISTED=0
 if [[ -f "$CONFIG_FILE" ]]; then
   CONFIG_EXISTED=1
 fi
 "$NODE_BIN" "$ROOT/scripts/configure-gbrain.js" "$CONFIG_FILE" "$MODEL_NAME" "$DIMENSIONS" "$BASE_URL"
 if [[ "$CONFIG_EXISTED" -ne 1 ]]; then
-  "$GBRAIN_BIN" init --pglite --no-embedding
+  "$GBRAIN_BIN" init --pglite \
+    --embedding-model "litellm:$MODEL_NAME" \
+    --embedding-dimensions "$DIMENSIONS" \
+    --skip-embed-check
   "$NODE_BIN" "$ROOT/scripts/configure-gbrain.js" "$CONFIG_FILE" "$MODEL_NAME" "$DIMENSIONS" "$BASE_URL"
 fi
 

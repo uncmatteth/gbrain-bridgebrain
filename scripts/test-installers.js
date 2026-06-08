@@ -43,10 +43,27 @@ exit 2
 
   writeExecutable(path.join(bin, 'fake-gbrain'), `#!/usr/bin/env bash
 set -euo pipefail
-home="\${GBRAIN_HOME:-$HOME/.gbrain}"
+home_parent="\${GBRAIN_HOME:-$HOME}"
+home="\${home_parent%/}/.gbrain"
 case "\${1:-}" in
   init)
     mkdir -p "$home"
+    if [[ "$*" == *"--no-embedding"* ]]; then
+      echo "fresh init must not disable embeddings" >&2
+      exit 2
+    fi
+    if [[ "$*" != *"--embedding-model litellm:chatgpt-bridge-semantic-hash-1536"* ]]; then
+      echo "fresh init missing BridgeBrain embedding model: $*" >&2
+      exit 2
+    fi
+    if [[ "$*" != *"--embedding-dimensions 1536"* ]]; then
+      echo "fresh init missing BridgeBrain dimensions: $*" >&2
+      exit 2
+    fi
+    if [[ "$*" != *"--skip-embed-check"* ]]; then
+      echo "fresh init must skip live embedding check during schema setup" >&2
+      exit 2
+    fi
     if [[ ! -f "$home/config.json" ]]; then
       printf '{}\\n' > "$home/config.json"
     fi
@@ -97,6 +114,13 @@ esac
     const text = fs.readFileSync(template, 'utf8');
     if (!text.includes('CODEX_HOME')) fail(`${path.basename(template)} does not export CODEX_HOME`);
   }
+  const installPs1 = fs.readFileSync(path.join(root, 'scripts', 'install.ps1'), 'utf8');
+  const verifyPs1 = fs.readFileSync(path.join(root, 'scripts', 'verify.ps1'), 'utf8');
+  if (installPs1.includes('--no-embedding')) fail('install.ps1 must not use --no-embedding for fresh init');
+  if (!installPs1.includes('--embedding-model "litellm:$ModelName"')) fail('install.ps1 missing embedding model init flag');
+  if (!installPs1.includes('--skip-embed-check')) fail('install.ps1 missing skip embed check init flag');
+  if (!installPs1.includes('Protect-LocalSecretPath $ConfigFile')) fail('install.ps1 does not protect tokenized config file');
+  if (!verifyPs1.includes('Join-Path $GbrainConfigDir "config.json"')) fail('verify.ps1 must use GBRAIN_HOME/.gbrain config path');
 
   const result = spawnSync('bash', ['scripts/install.sh', '--skip-service', '--skip-verify'], {
     cwd: root,
@@ -109,8 +133,8 @@ esac
     fail(`install.sh smoke failed\\nstdout:\\n${result.stdout}\\nstderr:\\n${result.stderr}`);
   }
 
-  const configFile = path.join(gbrainHome, 'config.json');
-  if (!fs.existsSync(configFile)) fail('installer did not write GBRAIN_HOME/config.json');
+  const configFile = path.join(gbrainHome, '.gbrain', 'config.json');
+  if (!fs.existsSync(configFile)) fail('installer did not write GBRAIN_HOME/.gbrain/config.json');
 
   const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
   if (config.embedding_dimensions !== 1536) fail(`unexpected dimensions: ${config.embedding_dimensions}`);
