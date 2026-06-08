@@ -23,6 +23,7 @@
     "scripts/",
     "src/",
     "systemd/",
+    "AGENTS.md",
     "CONTRIBUTING.md",
     "EVALS.md",
     "LICENSE",

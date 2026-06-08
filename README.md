@@ -49,6 +49,8 @@ The adapter uses Node.js built-in modules only. It listens on loopback by defaul
 
 ## Install
 
+If an agent is doing the install, read `AGENTS.md` first. It contains the no-secrets, no-cloud-CI, no-whole-disk-scan install rules and the exact preflight sequence.
+
 Prereqs:
 
 - Node.js 18+.
@@ -234,10 +236,11 @@ See `SECURITY.md` for the full boundary.
 - `scripts/hygiene-scan.sh` - public-release hygiene scan.
 - `systemd/` and `launchd/` - user service and machine-sync templates.
 - `evals/` - fixture corpus and query set.
+- `AGENTS.md` - agent install playbook and hard boundaries.
 
 ## Agent Boundary
 
-Give an agent this repo plus `README.md`, `SECURITY.md`, and `CONTRIBUTING.md`. Do not put private handoffs, local paths, logs, tokens, GBrain data, Codex state, or machine scan output in this public repo.
+Give an agent this repo plus `AGENTS.md`, `README.md`, `SECURITY.md`, and `CONTRIBUTING.md`. Do not put private handoffs, local paths, logs, tokens, GBrain data, Codex state, or machine scan output in this public repo.
 
 ## License
 
