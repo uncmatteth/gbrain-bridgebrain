@@ -307,6 +307,41 @@ exit 0
   if (state.bridgebrain_update_state !== true) fail('apply state file missing BridgeBrain ownership marker');
   assertNoSecrets('applied update state', JSON.stringify(state), upstreamSecrets);
 
+  const appliedCheck = run(['check', '--json', '--no-write-state', '--state-file', stateFile], {
+    ...env,
+    GBRAIN_FAKE_HEAD: secondHead,
+  });
+  if (!/already applied/.test(appliedCheck.recommendation || '')) {
+    fail(`check after successful apply did not prefer applied state: ${JSON.stringify(appliedCheck)}`);
+  }
+
+  const warningOnlyStateFile = path.join(temp, 'warning-only-state.json');
+  const warningOnlyHead = 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
+  const warningOnlyDoctor = JSON.stringify({
+    status: 'warnings',
+    checks: [
+      { name: 'connection', status: 'ok', message: 'connected' },
+      { name: 'embeddings', status: 'warn', message: 'No embeddings yet' },
+    ],
+  });
+  fs.writeFileSync(logFile, '');
+  const warningOnlyApply = run(['apply', '--json', '--state-file', warningOnlyStateFile], {
+    ...env,
+    GBRAIN_FAKE_HEAD: warningOnlyHead,
+    GBRAIN_FAKE_DOCTOR_JSON: warningOnlyDoctor,
+  });
+  if (warningOnlyApply.status !== 'applied') fail('warning-only doctor apply did not report applied status');
+  for (const label of ['pre-upgrade gbrain doctor', 'post-upgrade gbrain doctor']) {
+    const step = warningOnlyApply.steps.find((entry) => entry.label === label);
+    if (!step || step.status !== 'warnings') {
+      fail(`warning-only doctor step was not recorded as warnings for ${label}: ${JSON.stringify(warningOnlyApply.steps)}`);
+    }
+  }
+  const warningOnlyState = JSON.parse(fs.readFileSync(warningOnlyStateFile, 'utf8'));
+  if (warningOnlyState.last_applied_upstream_head !== warningOnlyHead || warningOnlyState.last_apply_status !== 'applied') {
+    fail('warning-only doctor apply did not record applied state');
+  }
+
   fs.writeFileSync(logFile, '');
   const fakeDefaultBasenameStateFile = path.join(temp, 'bridgebrain-gbrain-update-state.json');
   fs.writeFileSync(fakeDefaultBasenameStateFile, '{"not":"bridgebrain"}\n');

@@ -317,6 +317,9 @@ function readUpstreamHead(gitBin, repo) {
 }
 
 function updateRecommendation(report) {
+  if (report.lastAppliedUpstreamHead && report.lastAppliedUpstreamHead === report.upstreamHead) {
+    return 'This upstream commit is already applied locally. No GBrain update is needed.';
+  }
   if (report.lastUpgradeAttemptedUpstreamHead && report.lastUpgradeAttemptedUpstreamHead === report.upstreamHead) {
     return 'This upstream commit was already attempted locally. Re-run apply only after reviewing the installed GBrain version and doctor output.';
   }
@@ -416,24 +419,35 @@ function summarizeDoctor(parsed) {
   const status = String(parsed.status || parsed.overallStatus || parsed.overall_status || '').toLowerCase();
   const checks = flattenDoctorChecks(parsed);
   const failures = checks.filter((check) => ['fail', 'failed', 'error', 'critical', 'unhealthy'].includes(check.status));
+  const warnings = checks.filter((check) => ['warn', 'warning', 'warnings'].includes(check.status));
   const passingStatuses = new Set(['ok', 'pass', 'passed', 'healthy', 'skipped', 'skip', 'disabled', 'n/a']);
   const healthyStatuses = new Set(['healthy', 'ok', 'pass', 'passed']);
   const unhealthyStatuses = new Set(['unhealthy', 'fail', 'failed', 'error', 'critical']);
-  const unknowns = checks.filter((check) => !passingStatuses.has(check.status) && !failures.includes(check));
+  const warningStatuses = new Set(['warn', 'warning', 'warnings']);
+  const unknowns = checks.filter((check) => {
+    return !passingStatuses.has(check.status) && !warningStatuses.has(check.status) && !failures.includes(check);
+  });
   let healthy;
   if (unhealthyStatuses.has(status)) {
     healthy = false;
   } else if (healthyStatuses.has(status)) {
-    healthy = checks.length > 0 && failures.length === 0 && unknowns.length === 0;
+    healthy = checks.length > 0 && failures.length === 0 && warnings.length === 0 && unknowns.length === 0;
   } else {
     healthy = false;
   }
+  const warningOnly = !healthy &&
+    failures.length === 0 &&
+    unknowns.length === 0 &&
+    (warningStatuses.has(status) || warnings.length > 0);
   return {
     status: status || 'unknown',
     healthy,
+    warningOnly,
     failureCount: failures.length,
+    warningCount: warnings.length,
     unknownCount: unknowns.length,
     failures: [...failures, ...unknowns].slice(0, 8),
+    warnings: warnings.slice(0, 8),
   };
 }
 
@@ -448,6 +462,9 @@ function runDoctorGate(label, opts) {
     throw err;
   }
   const summary = summarizeDoctor(parsed);
+  if (summary.warningOnly && opts.allowWarnings) {
+    return summary;
+  }
   if (!summary.healthy && !opts.allowUnhealthy) {
     const failures = summary.failures
       .map((failure) => `${failure.name}:${failure.status}${failure.message ? `:${failure.message}` : ''}`)
@@ -697,8 +714,15 @@ function applyUpdate(opts) {
     }
 
     const versionBefore = report.gbrainVersion;
-    const preDoctor = runDoctorGate('pre-upgrade gbrain doctor', { allowUnhealthy: opts.allowUnhealthyBefore });
-    steps.push({ label: 'pre-upgrade gbrain doctor', status: preDoctor.healthy ? 'ok' : 'allowed-unhealthy', doctor: preDoctor });
+    const preDoctor = runDoctorGate('pre-upgrade gbrain doctor', {
+      allowUnhealthy: opts.allowUnhealthyBefore,
+      allowWarnings: true,
+    });
+    steps.push({
+      label: 'pre-upgrade gbrain doctor',
+      status: preDoctor.healthy ? 'ok' : preDoctor.warningOnly ? 'warnings' : 'allowed-unhealthy',
+      doctor: preDoctor,
+    });
 
     runRepoStep('pre-upgrade adapter tests', npmBin, ['test'], 120_000, opts, steps);
     runRepoStep('pre-upgrade package guard', npmBin, ['run', 'package:guard'], 120_000, opts, steps);
@@ -726,8 +750,15 @@ function applyUpdate(opts) {
     runRepoStep('gbrain upgrade', gbrainBin, ['upgrade'], 600_000, opts, steps);
     runRepoStep('reapply BridgeBrain LiteLLM patch', process.execPath, [patchScript], 120_000, opts, steps);
 
-    const postDoctor = runDoctorGate('post-upgrade gbrain doctor', { allowUnhealthy: false });
-    steps.push({ label: 'post-upgrade gbrain doctor', status: 'ok', doctor: postDoctor });
+    const postDoctor = runDoctorGate('post-upgrade gbrain doctor', {
+      allowUnhealthy: false,
+      allowWarnings: true,
+    });
+    steps.push({
+      label: 'post-upgrade gbrain doctor',
+      status: postDoctor.healthy ? 'ok' : 'warnings',
+      doctor: postDoctor,
+    });
 
     runRepoStep('post-upgrade repo check', npmBin, ['run', 'check'], 300_000, opts, steps);
 
