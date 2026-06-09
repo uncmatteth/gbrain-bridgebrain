@@ -53,16 +53,10 @@ Use the bundled bridge script:
 ```bash
 node scripts/gpt-web-login-bridge.js status
 node scripts/gpt-web-login-bridge.js smoke
-node scripts/gpt-web-login-bridge.js ask "Return exactly OK."
+printf '%s\n' "Return exactly OK." | node scripts/gpt-web-login-bridge.js ask
 ```
 
-Default provider is Codex CLI. The script uses:
-
-```bash
-codex exec --ignore-user-config --ignore-rules --skip-git-repo-check --ephemeral --json -
-```
-
-This uses Codex auth while avoiding recursive user config, hooks, persistent session files, prompt argv leakage, and local shell/browser/app/search tools for the bridge call. It is the clean route: let Codex be logged in, let the bridge call Codex, keep the agent's grubby little hands away from secrets.
+Default provider is Codex CLI. Do not copy a raw `codex exec` command from here; call the bridge script. The wrapper owns the protected Codex invocation, including stdin-only prompt input, read-only sandboxing, disabled shell/browser/app/image/multi-agent/web-search surfaces, and no user config or rules for the nested bridge call.
 
 Before running `ask` or `smoke`, confirm the prompt is safe to send to the authenticated provider. If the prompt contains secrets or private material, stop instead of forwarding it.
 
@@ -77,9 +71,9 @@ Before running `ask` or `smoke`, confirm the prompt is safe to send to the authe
 
 - `status`: report only whether the local provider is available. It must not print auth mode, token presence, API-key presence, raw paths, or secrets.
 - `smoke`: send a fixed harmless prompt through the authenticated local provider to prove the bridge can get a model response.
-- `ask "prompt"`: send the supplied prompt through the authenticated local provider using stdin internally. This transmits prompt content to that provider account.
+- `ask`: read prompt text only from stdin, reject command-line prompt arguments, then send it through the authenticated local provider. This transmits prompt content to that provider account.
 
-The script also accepts prompt text on stdin:
+Prompt text must come from stdin so it does not sit in the bridge process argv:
 
 ```bash
 printf '%s\n' "Return exactly OK." | node scripts/gpt-web-login-bridge.js ask

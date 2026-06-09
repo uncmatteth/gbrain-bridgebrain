@@ -8,15 +8,17 @@
     "gbrain-bridgebrain": "src/gbrain-chatgpt-embeddings-server.js"
   },
   "scripts": {
-    "check": "bash scripts/check.sh",
-    "test": "node scripts/test-adapter.js",
+    "check": "node scripts/check.js",
+    "test": "node scripts/test-node.js",
     "eval": "node scripts/eval.js",
-    "hygiene": "bash scripts/hygiene-scan.sh",
+    "hygiene": "node scripts/hygiene-scan.js",
+    "test:eval-auth": "node scripts/test-eval-auth.js",
     "gbrain:update:check": "node scripts/gbrain-update-check.js check",
     "gbrain:update:apply": "node scripts/gbrain-update-check.js apply",
     "package:guard": "node scripts/package-guard.js",
+    "release:gate": "node scripts/release-gate.js",
     "prepack": "node scripts/package-guard.js",
-    "prepublishOnly": "node scripts/package-guard.js --publish"
+    "prepublishOnly": "node scripts/release-gate.js --publish"
   },
   "files": [
     "bridge-skill/",

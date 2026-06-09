@@ -26,6 +26,8 @@
     <string>1</string>
     <key>BRIDGEBRAIN_ALLOW_WIDE_MACHINE_MEMORY_ROOTS</key>
     <string>@ALLOW_WIDE_ROOTS@</string>
+    <key>CODEX_HOME</key>
+    <string>@CODEX_HOME@</string>
     <key>GBRAIN_BIN</key>
     <string>@GBRAIN_BIN@</string>
     <key>GBRAIN_HOME</key>

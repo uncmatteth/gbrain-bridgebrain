@@ -45,7 +45,7 @@ The agent-facing playbook is `AGENTS.md`. It tells the agent how to check Node, 
 - `mock` profile for CI and no-login tests.
 - Linux user `systemd`, macOS `launchd`, and Windows Scheduled Task installers.
 - Optional machine-memory source discovery and recurring GBrain sync.
-- GBrain LiteLLM compatibility patch with backups and hard failure if the expected upstream code changed.
+- GBrain LiteLLM compatibility patch for model-id and dimension guards, with backups and hard failure if expected upstream code changed.
 - Eval fixtures and recall/MRR scoring.
 - Hygiene checks for public repo safety.
 
@@ -88,6 +88,7 @@ Prereqs:
 - Node.js 18+.
 - Codex CLI installed and already logged in with ChatGPT auth.
 - GBrain installed, or Bun installed if you want `--install-gbrain`.
+  The optional installer path pins GBrain to a reviewed commit by default; set `GBRAIN_INSTALL_SPEC` only if you intentionally want a different GBrain source.
 
 Linux or macOS:
 
@@ -107,7 +108,7 @@ cd gbrain-bridgebrain
 
 The installer copies the bundled bridge skill into the current user's Codex home, installs the adapter service, patches GBrain's LiteLLM model-id check, configures GBrain, and runs verification.
 
-It also generates a per-install local token. GBrain's LiteLLM base URL is written as `http://127.0.0.1:<port>/v1/t/<generated-token>`, and the service receives the matching `BRIDGEBRAIN_API_TOKEN`. Do not publish that local config or service file.
+It also generates a per-install local token. GBrain's LiteLLM base URL is written as `http://127.0.0.1:<port>/v1/t/<generated-token>`, and the installed service explicitly sets `BRIDGEBRAIN_ALLOW_PATH_TOKEN=1` so that GBrain-compatible tokenized path works. Do not publish that local config or service file.
 
 If you use a non-default GBrain home, set `GBRAIN_HOME` to GBrain's parent directory before installing and verifying. The config file is `$GBRAIN_HOME/.gbrain/config.json`.
 
@@ -187,11 +188,7 @@ The apply command is intentionally strict:
 - runs `gbrain doctor --json` again;
 - runs the full repo check after the upgrade.
 
-By default, the backup is metadata-only: manifest plus a redacted GBrain config summary. It does not copy the GBrain database, local memory files, raw provider tokens, or unknown config fields. To make a full private `.gbrain` data snapshot outside the repo, pass `-- --full-data-backup` only after the user accepts that local data-copying scope:
-
-```bash
-npm run gbrain:update:apply -- --full-data-backup
-```
+By default, the backup is metadata-only: manifest plus a redacted GBrain config summary. It does not copy the GBrain database, local memory files, raw provider tokens, or unknown config fields. Full data snapshots are intentionally outside the public workflow; make one only after a direct local operator request, to a private local path, and never package or publish it.
 
 If doctor or tests fail, the upgrade stops. If a post-upgrade gate fails, the command prints the backup path and stops instead of silently rolling back a live local brain.
 
@@ -269,7 +266,7 @@ Live eval against an installed BridgeBrain service reads GBrain's configured Lit
 node scripts/eval.js --live
 ```
 
-You can override the target with `BRIDGEBRAIN_EVAL_BASE_URL` and pass the local token with `BRIDGEBRAIN_API_TOKEN` or `GBRAIN_CHATGPT_EMBED_TOKEN`.
+In live mode, you can override the target with `BRIDGEBRAIN_EVAL_BASE_URL` and pass the local token with `BRIDGEBRAIN_API_TOKEN` or `GBRAIN_CHATGPT_EMBED_TOKEN`. Mock mode ignores `BRIDGEBRAIN_EVAL_BASE_URL` and always uses a spawned loopback service.
 
 The eval prints recall@K and MRR. The bundled fixture is small on purpose: it proves the harness works. Bring a better corpus, submit results, and break the damn thing in public.
 
@@ -279,7 +276,7 @@ BridgeBrain sends text being embedded through the already-authenticated provider
 
 The bundled bridge passes prompt text through stdin, not command-line args, and disables the child Codex shell/browser/app/search tool surfaces before model calls.
 
-Embedding POSTs require the per-install local token, either in the tokenized `/v1/t/<token>/...` path written by the installer or as `Authorization: Bearer <token>`.
+Embedding POSTs require the per-install local token. The server default prefers `Authorization: Bearer <token>`; the installer enables tokenized `/v1/t/<token>/...` compatibility with `BRIDGEBRAIN_ALLOW_PATH_TOKEN=1` because GBrain stores a provider base URL. Header auth is cleaner when the caller can set headers.
 
 Never publish:
 
@@ -305,7 +302,8 @@ See `SECURITY.md` for the full boundary.
 - `scripts/test-adapter.js` - no-login adapter smoke test.
 - `scripts/test-bridge.js` - bridge stdin/no-shell-tool smoke test.
 - `scripts/eval.js` - recall/MRR eval harness.
-- `scripts/hygiene-scan.sh` - public-release hygiene scan.
+- `scripts/hygiene-scan.js` - public-release hygiene scan.
+- `scripts/hygiene-scan.sh` - optional POSIX wrapper for the Node hygiene scan.
 - `systemd/` and `launchd/` - user service and machine-sync templates.
 - `evals/` - fixture corpus and query set.
 - `AGENTS.md` - agent install playbook and hard boundaries.

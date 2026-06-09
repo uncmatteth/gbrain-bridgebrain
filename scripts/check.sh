@@ -3,16 +3,27 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+TMP_FILES=()
+cleanup() {
+  rm -f "${TMP_FILES[@]}"
+}
+trap cleanup EXIT
 
 echo "JS syntax..."
+JS_LIST="$(mktemp)"
+TMP_FILES+=("$JS_LIST")
+find src scripts bridge-skill -type f -name '*.js' | sort >"$JS_LIST"
 while IFS= read -r file; do
   node --check "$file"
-done < <(find src scripts bridge-skill -type f -name '*.js' | sort)
+done < "$JS_LIST"
 
 echo "Shell syntax..."
+SH_LIST="$(mktemp)"
+TMP_FILES+=("$SH_LIST")
+find scripts -type f -name '*.sh' | sort >"$SH_LIST"
 while IFS= read -r file; do
   bash -n "$file"
-done < <(find scripts -type f -name '*.sh' | sort)
+done < "$SH_LIST"
 
 echo "PowerShell syntax..."
 if command -v pwsh >/dev/null 2>&1; then
@@ -41,10 +52,10 @@ node scripts/eval.js
 echo "Live eval auth smoke..."
 node scripts/test-eval-auth.js
 
-echo "Package guard..."
-node scripts/package-guard.js
+echo "Hygiene scan..."
+node scripts/hygiene-scan.js
 
-echo "Hygiene..."
-scripts/hygiene-scan.sh
+echo "Release gate..."
+node scripts/release-gate.js
 
 echo "All local checks completed."

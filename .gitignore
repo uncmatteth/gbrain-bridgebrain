@@ -25,6 +25,15 @@ handoff*.md
 *.sqlite
 *.sqlite3
 *.db
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite3-journal
+*.db-wal
+*.db-shm
+*.db-journal
 *.pglite/
 
 coverage/

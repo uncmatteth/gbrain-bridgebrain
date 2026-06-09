@@ -8,8 +8,10 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
+const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
 const DEFAULT_MAX_DEPTH = 5;
 const SOURCE_ID_PREFIX = 'mm';
+const GBRAIN_SERVE_WRAPPERS = new Set(['node', 'bun', 'bunx', 'deno', 'tsx', 'ts-node', 'npx', 'npm', 'pnpm', 'yarn']);
 const EXCLUDED_DISCOVERY_DIRS = new Set([
   '.cache',
   '.git',
@@ -68,7 +70,9 @@ function parseArgs(argv) {
     noPull: true,
     noEmbed: false,
     terminateServe: process.env.GBRAIN_MACHINE_TERMINATE_SERVE || 'none',
-    timeoutSec: Number(process.env.GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS || 600),
+    timeoutSec: process.env.GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS
+      ? positiveInt(process.env.GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS, 'GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS')
+      : 600,
     json: false,
     dryRun: false,
   };
@@ -191,9 +195,10 @@ function hasGitMarker(dir) {
 }
 
 function shouldSkipEntry(name, dir) {
+  if (privateRootReason(normalizeKey(dir))) return true;
   if (name.startsWith('.')) return true;
-  if (hasGitMarker(dir)) return false;
   if (EXCLUDED_DISCOVERY_DIRS.has(name)) return true;
+  if (hasGitMarker(dir)) return false;
   return false;
 }
 
@@ -236,11 +241,12 @@ function discoverGitRepos(roots, maxDepth) {
   return repos.sort((a, b) => a.localeCompare(b));
 }
 
-function sourceIdForRepo(repoPath) {
-  const hash = crypto.createHash('sha256').update(normalizeKey(repoPath)).digest('hex').slice(0, 8);
+function sourceIdForRepo(repoPath, hashLength = 8) {
+  const safeHashLength = Math.min(Math.max(Number(hashLength) || 8, 8), 24);
+  const hash = crypto.createHash('sha256').update(normalizeKey(repoPath)).digest('hex').slice(0, safeHashLength);
   let slug = path.basename(repoPath).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   if (!slug) slug = 'repo';
-  const maxSlug = 32 - SOURCE_ID_PREFIX.length - 2 - hash.length;
+  const maxSlug = Math.max(1, 32 - SOURCE_ID_PREFIX.length - 2 - hash.length);
   if (slug.length > maxSlug) slug = slug.slice(0, maxSlug).replace(/-+$/g, '');
   return `${SOURCE_ID_PREFIX}-${slug}-${hash}`;
 }
@@ -279,6 +285,7 @@ function run(command, args, opts = {}) {
     encoding: 'utf8',
     env: { ...process.env, GBRAIN_NO_BANNER: '1', ...(opts.env || {}) },
     timeout: opts.timeoutMs || DEFAULT_TIMEOUT_MS,
+    maxBuffer: opts.maxBuffer || DEFAULT_MAX_BUFFER,
   });
   if (result.error) {
     const msg = result.error.code === 'ETIMEDOUT'
@@ -294,9 +301,26 @@ function gbrain(args, opts = {}) {
   return run(bin, args, opts);
 }
 
+function redactString(value) {
+  const tokenValues = [
+    process.env.BRIDGEBRAIN_API_TOKEN,
+    process.env.GBRAIN_CHATGPT_EMBED_TOKEN,
+  ].filter(Boolean);
+  let text = String(value || '')
+    .replace(/\/v1\/t\/[^/\s"'`?#]+/g, '/v1/t/<redacted>')
+    .replace(/\/t\/[^/\s"'`?#]+/g, '/t/<redacted>')
+    .replace(/([?&][^=&#?\s]*(?:token|secret|password|cookie|api[_-]?key|authorization|credential|bearer|client[_-]?secret)[^=&#?\s]*=)[^&#\s]+/gi, '$1<redacted>')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer <redacted>')
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)([^/@\s]+)@/gi, '$1<redacted>@');
+  for (const token of tokenValues) {
+    text = text.split(token).join('<redacted>');
+  }
+  return text;
+}
+
 function requireOk(result, label) {
   if (result.status !== 0) {
-    throw new Error(`${label} failed (${result.status}): ${(result.stderr || result.stdout || '').trim()}`);
+    throw new Error(`${label} failed (${result.status}): ${redactString((result.stderr || result.stdout || '').trim())}`);
   }
 }
 
@@ -334,42 +358,49 @@ function listSyncStatusSources() {
 }
 
 function gbrainConfigPath() {
-  const homeParent = process.env.GBRAIN_HOME || os.homedir();
-  return path.join(homeParent, '.gbrain', 'config.json');
+  return path.join(process.env.GBRAIN_HOME || os.homedir(), '.gbrain', 'config.json');
 }
 
-function readGbrainConfig() {
+function listConfigSources() {
+  const configFile = gbrainConfigPath();
+  if (!fs.existsSync(configFile)) return [];
+  let parsed;
   try {
-    return JSON.parse(fs.readFileSync(gbrainConfigPath(), 'utf8'));
-  } catch {
-    return {};
+    parsed = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+  } catch (err) {
+    throw new Error(`Could not parse GBrain config JSON: ${err.message}`);
   }
+  if (!parsed || typeof parsed !== 'object') return [];
+  const containers = [
+    parsed.sources,
+    parsed.source_configs,
+    parsed.sourceConfigs,
+    parsed.repositories,
+    parsed.repos,
+    parsed.federated_sources,
+    parsed.federatedSources,
+    parsed.federation && parsed.federation.sources,
+    parsed.multi_source && parsed.multi_source.sources,
+    parsed.multiSource && parsed.multiSource.sources,
+    parsed.sync && parsed.sync.sources,
+  ];
+  return containers.flatMap(normalizeConfigSources);
 }
 
-function sourceConfigCandidates(config) {
-  const candidates = [];
-  const containers = [
-    config.sources,
-    config.source_configs,
-    config.sourceConfigs,
-    config.repositories,
-    config.repos,
-    config.federated_sources,
-    config.federation && config.federation.sources,
-    config.multi_source && config.multi_source.sources,
-    config.multiSource && config.multiSource.sources,
-  ];
-
-  for (const container of containers) {
-    if (Array.isArray(container)) {
-      container.filter((item) => item && typeof item === 'object').forEach((item) => candidates.push(item));
-    } else if (container && typeof container === 'object') {
-      for (const [id, value] of Object.entries(container)) {
-        if (value && typeof value === 'object') candidates.push({ id, ...value });
-      }
+function normalizeConfigSources(rawSources) {
+  if (Array.isArray(rawSources)) return rawSources.filter((source) => source && typeof source === 'object');
+  if (!rawSources || typeof rawSources !== 'object') return [];
+  const sources = [];
+  for (const [id, value] of Object.entries(rawSources)) {
+    if (typeof value === 'string') {
+      sources.push({ id, local_path: value });
+    } else if (value && typeof value === 'object') {
+      const source = { ...value };
+      if (!sourceId(source)) source.id = id;
+      sources.push(source);
     }
   }
-  return candidates;
+  return sources;
 }
 
 function sourceLocalPath(source) {
@@ -378,16 +409,6 @@ function sourceLocalPath(source) {
 
 function sourceId(source) {
   return source.id || source.source_id || source.sourceId || '';
-}
-
-function mergeSourceConfig(source, configSources) {
-  const sourcePath = sourceLocalPath(source);
-  const config = configSources.find((candidate) => {
-    if (candidate.id && sourceId(source) && candidate.id === sourceId(source)) return true;
-    const candidatePath = sourceLocalPath(candidate);
-    return candidatePath && sourcePath && samePath(candidatePath, sourcePath);
-  });
-  return config ? { ...source, __config: config } : source;
 }
 
 function disabledFlagFrom(value) {
@@ -399,6 +420,18 @@ function disabledFlagFrom(value) {
   if (value.sync && typeof value.sync === 'object') {
     if (value.sync.enabled === false) return true;
     if (value.sync.disabled === true) return true;
+  }
+  return false;
+}
+
+function enabledFlagFrom(value) {
+  if (!value || typeof value !== 'object') return false;
+  if (value.disabled === true || value.enabled === false) return false;
+  if (value.syncEnabled === false || value.sync_enabled === false) return false;
+  if (value.syncEnabled === true || value.sync_enabled === true || value.enabled === true) return true;
+  if (value.sync && typeof value.sync === 'object') {
+    if (value.sync.disabled === true || value.sync.enabled === false) return false;
+    if (value.sync.enabled === true) return true;
   }
   return false;
 }
@@ -422,6 +455,15 @@ function sourceSyncDisabled(source) {
     source.__config && source.__config.settings,
     source.__config && source.__config.status,
   ].some(disabledFlagFrom);
+}
+
+function sourceSyncExplicitlyEnabled(source) {
+  return [
+    source,
+    source.config,
+    source.settings,
+    source.status,
+  ].some(enabledFlagFrom);
 }
 
 function pathsOverlap(a, b) {
@@ -458,8 +500,12 @@ function matchingIndexedSource(source, index) {
 
 function registerRepos(repos, sources, opts) {
   const byPath = new Map();
+  const byId = new Map();
   for (const source of sources) {
-    if (source.local_path) byPath.set(normalizeKey(source.local_path), source);
+    const localPath = sourceLocalPath(source);
+    const id = sourceId(source);
+    if (localPath) byPath.set(normalizeKey(localPath), source);
+    if (id) byId.set(id, source);
   }
 
   const registered = [];
@@ -467,41 +513,63 @@ function registerRepos(repos, sources, opts) {
   for (const repo of repos) {
     const existing = byPath.get(normalizeKey(repo));
     if (existing) {
-      registered.push({ id: existing.id, path: repo, existing: true });
+      registered.push({ id: sourceId(existing), path: repo, existing: true });
       continue;
     }
 
-    const overlap = sources.find((source) => source.local_path && pathsOverlap(repo, source.local_path));
+    const overlap = sources.find((source) => {
+      const localPath = sourceLocalPath(source);
+      return localPath && pathsOverlap(repo, localPath);
+    });
     if (overlap) {
-      skipped.push({ path: repo, reason: `overlaps source ${overlap.id}` });
+      skipped.push({ path: repo, reason: `overlaps source ${sourceId(overlap)}` });
       continue;
     }
 
-    const id = sourceIdForRepo(repo);
+    let id = sourceIdForRepo(repo);
+    for (const hashLength of [8, 12, 16, 20, 24]) {
+      const candidate = sourceIdForRepo(repo, hashLength);
+      const collision = byId.get(candidate);
+      if (!collision || samePath(sourceLocalPath(collision), repo)) {
+        id = candidate;
+        break;
+      }
+    }
     const name = path.basename(repo);
     if (opts.dryRun) {
       log(`[dry-run] gbrain sources add ${id} --path ${repo}`, opts);
       sources.push({ id, local_path: repo, __planned: true });
       byPath.set(normalizeKey(repo), { id, local_path: repo, __planned: true });
+      byId.set(id, { id, local_path: repo, __planned: true });
       registered.push({ id, path: repo, dryRun: true });
       continue;
     }
 
-    const result = gbrain(['sources', 'add', id, '--path', repo, '--name', name, '--federated'], {
-      timeoutMs: 60_000,
-    });
-    if (result.status !== 0) {
+    let result = null;
+    let finalId = id;
+    for (const hashLength of [8, 12, 16, 20, 24]) {
+      finalId = sourceIdForRepo(repo, hashLength);
+      const collision = byId.get(finalId);
+      if (collision && !samePath(sourceLocalPath(collision), repo)) continue;
+      result = gbrain(['sources', 'add', finalId, '--path', repo, '--name', name, '--federated'], {
+        timeoutMs: 60_000,
+      });
       const text = `${result.stderr || ''}${result.stdout || ''}`;
+      if (result.status === 0 || !/source.*taken|duplicate key|already exists/i.test(text)) break;
+    }
+    if (!result || result.status !== 0) {
+      const text = result ? `${result.stderr || ''}${result.stdout || ''}` : '';
       if (/source.*taken|duplicate key|already exists/i.test(text)) {
-        skipped.push({ path: repo, reason: `source id already exists: ${id}` });
+        skipped.push({ path: repo, reason: `source id collision after retries: ${finalId}` });
         continue;
       }
-      throw new Error(`Could not add source ${id} for ${repo}: ${text.trim()}`);
+      throw new Error(`Could not add source ${finalId} for ${repo}: ${redactString(text.trim())}`);
     }
-    log(`registered ${id} -> ${repo}`, opts);
-    registered.push({ id, path: repo, existing: false });
-    sources.push({ id, local_path: repo });
-    byPath.set(normalizeKey(repo), { id, local_path: repo });
+    log(`registered ${finalId} -> ${repo}`, opts);
+    registered.push({ id: finalId, path: repo, existing: false });
+    sources.push({ id: finalId, local_path: repo });
+    byPath.set(normalizeKey(repo), { id: finalId, local_path: repo });
+    byId.set(finalId, { id: finalId, local_path: repo });
   }
   return { registered, skipped };
 }
@@ -519,61 +587,139 @@ function findServeProcesses() {
       if (!match) return null;
       return { pid: Number(match[1]), ppid: Number(match[2]), args: match[3] };
     })
-    .filter((proc) => proc && proc.pid !== process.pid && /\bgbrain\b.*\bserve\b/.test(proc.args));
+    .filter((proc) => proc && proc.pid !== process.pid && isGbrainServeProcess(proc.args));
 }
 
-function terminateServe(mode, opts) {
+function shellWords(commandLine) {
+  const words = [];
+  const pattern = /"([^"\\]*(?:\\.[^"\\]*)*)"|'([^']*)'|(\S+)/g;
+  let match;
+  while ((match = pattern.exec(commandLine))) {
+    words.push((match[1] || match[2] || match[3] || '').replace(/\\"/g, '"'));
+  }
+  return words;
+}
+
+function normalizedBasename(word) {
+  return path.basename(String(word || '')).toLowerCase().replace(/\.(exe|cmd|bat)$/i, '');
+}
+
+function isGbrainCommandWord(word) {
+  return normalizedBasename(word) === 'gbrain';
+}
+
+function isWrapperCommandWord(word) {
+  return GBRAIN_SERVE_WRAPPERS.has(normalizedBasename(word));
+}
+
+function isGbrainPathWord(word) {
+  const normalized = String(word || '').replace(/\\/g, '/').toLowerCase();
+  const base = path.posix.basename(normalized);
+  return /^gbrain(?:\.(?:exe|cmd|bat|[cm]?[jt]s))?$/.test(base) ||
+    normalized.includes('/garrytan/gbrain/') ||
+    normalized.includes('/@garrytan/gbrain/') ||
+    normalized.includes('/node_modules/gbrain/') ||
+    normalized.includes('/node_modules/.bin/gbrain');
+}
+
+function isGbrainServeProcess(commandLine) {
+  const words = shellWords(commandLine);
+  if (words.length < 2) return false;
+  if (isGbrainCommandWord(words[0]) && words[1] === 'serve') return true;
+  if (!isWrapperCommandWord(words[0])) return false;
+  for (let i = 1; i < words.length - 1; i++) {
+    if (isGbrainCommandWord(words[i]) && words[i + 1] === 'serve') return true;
+  }
+  for (let i = 1; i < words.length; i++) {
+    if (words[i] !== 'serve') continue;
+    if (words.slice(1, i).some(isGbrainPathWord)) return true;
+  }
+  return false;
+}
+
+function terminateServe(mode, opts = {}, deps = {}) {
   if (mode === 'none' || process.platform === 'win32') return [];
-  const candidates = findServeProcesses();
+  const listProcesses = deps.findServeProcesses || findServeProcesses;
+  const killProcess = deps.kill || process.kill.bind(process);
+  const sleep = deps.sleep || (() => run('sleep', ['0.25'], { timeoutMs: 1_000 }));
+  const candidates = listProcesses();
   if (candidates.length === 0) return [];
+  const candidatePids = new Set(candidates.map((proc) => proc.pid));
+  const remainingCandidates = () => listProcesses().filter((proc) => candidatePids.has(proc.pid));
   if (opts.dryRun) {
     candidates.forEach((proc) => log(`[dry-run] terminate gbrain serve pid=${proc.pid} ppid=${proc.ppid}`, opts));
     return candidates.map((proc) => proc.pid);
   }
   for (const proc of candidates) {
     try {
-      process.kill(proc.pid, 'SIGTERM');
-      log(`terminated gbrain serve pid=${proc.pid} ppid=${proc.ppid}`, opts);
+      killProcess(proc.pid, 'SIGTERM');
+      log(`sent SIGTERM to gbrain serve pid=${proc.pid} ppid=${proc.ppid}`, opts);
     } catch {
       // Process already exited.
     }
   }
   for (let i = 0; i < 20; i++) {
-    const remaining = findServeProcesses().filter((proc) => candidates.some((c) => c.pid === proc.pid));
+    const remaining = remainingCandidates();
     if (remaining.length === 0) break;
-    run('sleep', ['0.25'], { timeoutMs: 1_000 });
+    sleep();
   }
+  const remaining = remainingCandidates();
+  if (remaining.length > 0) {
+    const pids = remaining.map((proc) => proc.pid).join(', ');
+    throw new Error(`could not terminate gbrain serve process(es): ${pids}. Stop them before syncing machine memory.`);
+  }
+  candidates.forEach((proc) => log(`terminated gbrain serve pid=${proc.pid} ppid=${proc.ppid}`, opts));
   return candidates.map((proc) => proc.pid);
 }
 
 function syncSources(sources, repoPaths, opts) {
-  const configSources = sourceConfigCandidates(readGbrainConfig());
-  const syncStatusIndex = buildSourceIndex(listSyncStatusSources());
-  const archivedIds = new Set(listArchivedSources().map((source) => sourceId(source)).filter(Boolean));
+  const targetSources = sources
+    .filter((source) => sourceLocalPath(source))
+    .filter((source) => repoPaths.some((repoPath) => samePath(sourceLocalPath(source), repoPath)));
+  const dryRunPlannedOnly = opts.dryRun && targetSources.every((source) => source.__planned);
+  const configSourceIndex = dryRunPlannedOnly ? buildSourceIndex([]) : buildSourceIndex(listConfigSources());
+  const syncStatusIndex = dryRunPlannedOnly ? buildSourceIndex([]) : buildSourceIndex(listSyncStatusSources());
+  const archivedIds = dryRunPlannedOnly ? new Set() : new Set(listArchivedSources().map((source) => sourceId(source)).filter(Boolean));
   const skipped = [];
   const syncable = [];
-  for (const source of sources
-    .map((source) => mergeSourceConfig(source, configSources))
-    .filter((source) => source.local_path)
-    .filter((source) => repoPaths.some((repoPath) => samePath(source.local_path, repoPath)))) {
+  for (const source of targetSources) {
     const id = sourceId(source);
+    const localPath = sourceLocalPath(source);
+    if (opts.dryRun && source.__planned) {
+      const configSource = matchingIndexedSource(source, configSourceIndex);
+      if (sourceSyncDisabled({ ...source, __config: configSource })) {
+        skipped.push({ id, path: localPath, status: 'skipped', reason: 'sync disabled' });
+        continue;
+      }
+      if (!source.__planned && !sourceSyncExplicitlyEnabled(configSource || source)) {
+        skipped.push({ id, path: localPath, status: 'skipped', reason: 'sync not explicitly enabled' });
+        continue;
+      }
+      syncable.push(source);
+      continue;
+    }
     const syncStatusSource = source.__planned ? source : matchingIndexedSource(source, syncStatusIndex);
     if (id && archivedIds.has(id)) {
-      skipped.push({ id, path: source.local_path, status: 'skipped', reason: 'archived source' });
+      skipped.push({ id, path: localPath, status: 'skipped', reason: 'archived source' });
       continue;
     }
     if (!syncStatusSource) {
-      skipped.push({ id, path: source.local_path, status: 'skipped', reason: 'not present in gbrain sync status' });
+      skipped.push({ id, path: localPath, status: 'skipped', reason: 'not present in gbrain sync status' });
+      continue;
+    }
+    if (!source.__planned && !sourceSyncExplicitlyEnabled(syncStatusSource)) {
+      skipped.push({ id, path: localPath, status: 'skipped', reason: 'sync not explicitly enabled' });
       continue;
     }
     const syncStatusPath = sourceLocalPath(syncStatusSource);
-    if (syncStatusPath && !samePath(syncStatusPath, source.local_path)) {
-      skipped.push({ id, path: source.local_path, status: 'skipped', reason: 'sync status path mismatch' });
+    if (syncStatusPath && !samePath(syncStatusPath, localPath)) {
+      skipped.push({ id, path: localPath, status: 'skipped', reason: 'sync status path mismatch' });
       continue;
     }
-    const sourceWithStatus = { ...source, __syncStatus: syncStatusSource };
+    const configSource = matchingIndexedSource(source, configSourceIndex);
+    const sourceWithStatus = { ...source, __syncStatus: syncStatusSource, __config: configSource };
     if (sourceSyncDisabled(sourceWithStatus)) {
-      skipped.push({ id, path: source.local_path, status: 'skipped', reason: 'sync disabled' });
+      skipped.push({ id, path: localPath, status: 'skipped', reason: 'sync disabled' });
       continue;
     }
     syncable.push(source);
@@ -581,30 +727,32 @@ function syncSources(sources, repoPaths, opts) {
 
   const results = [...skipped];
   for (const source of syncable) {
-    const args = ['sync', '--source', source.id, '--strategy', 'auto', '--yes', '--json'];
+    const id = sourceId(source);
+    const localPath = sourceLocalPath(source);
+    const args = ['sync', '--source', id, '--strategy', 'auto', '--yes', '--json'];
     if (opts.noPull) args.push('--no-pull');
     if (opts.noEmbed) args.push('--no-embed');
 
     if (opts.dryRun) {
       log(`[dry-run] gbrain ${args.join(' ')}`, opts);
-      results.push({ id: source.id, status: 'dry_run' });
+      results.push({ id, path: localPath, status: 'dry_run' });
       continue;
     }
 
-    log(`sync ${source.id} (${source.local_path})`, opts);
+    log(`sync ${id} (${localPath})`, opts);
     const result = gbrain(args, {
-      cwd: source.local_path,
+      cwd: os.homedir(),
       timeoutMs: Math.max((opts.timeoutSec + 30) * 1000, 60_000),
     });
     const record = {
-      id: source.id,
-      path: source.local_path,
+      id,
+      path: localPath,
       exitCode: result.status,
-      stdout: (result.stdout || '').trim(),
-      stderr: (result.stderr || '').trim(),
+      stdout: redactString((result.stdout || '').trim()),
+      stderr: redactString((result.stderr || '').trim()),
     };
     if (result.status !== 0) {
-      log(`sync failed ${source.id}: ${record.stderr || record.stdout}`, opts);
+      log(`sync failed ${id}: ${record.stderr || record.stdout}`, opts);
       record.status = 'error';
     } else {
       record.status = 'ok';
@@ -624,13 +772,62 @@ function validateRunRoots(roots) {
   const home = normalizeKey(os.homedir());
   const homeParent = normalizeKey(path.dirname(os.homedir()));
   const fsRoot = normalizeKey(path.parse(os.homedir()).root);
-  if (process.env.BRIDGEBRAIN_ALLOW_WIDE_MACHINE_MEMORY_ROOTS === '1') return;
   for (const root of roots) {
+    let stat;
+    try {
+      stat = fs.statSync(root);
+    } catch {
+      throw new Error(`machine-memory root does not exist or is unreadable: ${root}`);
+    }
+    if (!stat.isDirectory()) {
+      throw new Error(`machine-memory root is not a directory: ${root}`);
+    }
     const key = normalizeKey(root);
-    if (key === home || key === homeParent || key === fsRoot) {
+    const privateReason = privateRootReason(key);
+    if (privateReason) {
+      throw new Error(`private machine-memory root blocked: ${root} (${privateReason}). Use specific public repo/work roots.`);
+    }
+    if (process.env.BRIDGEBRAIN_ALLOW_WIDE_MACHINE_MEMORY_ROOTS === '1') continue;
+    if (key === home || key === homeParent || key === fsRoot || isDefaultBlockedWideRoot(key)) {
       throw new Error(`wide machine-memory root blocked: ${root}. Use specific repo/work roots, or set BRIDGEBRAIN_ALLOW_WIDE_MACHINE_MEMORY_ROOTS=1 after review.`);
     }
   }
+}
+
+function keyWithin(key, parent) {
+  if (!parent) return false;
+  return key === parent || key.startsWith(`${parent}${path.sep}`);
+}
+
+function privateRootReason(key) {
+  const home = normalizeKey(os.homedir());
+  const privateRoots = [
+    process.env.CODEX_HOME || path.join(os.homedir(), '.codex'),
+    path.join(process.env.GBRAIN_HOME || os.homedir(), '.gbrain'),
+    path.join(os.homedir(), '.openclaw'),
+    path.join(os.homedir(), '.agents'),
+    path.join(os.homedir(), '.codex', 'memories'),
+  ].map(normalizeKey);
+  for (const privateRoot of privateRoots) {
+    if (keyWithin(key, privateRoot)) return privateRoot;
+  }
+  const relativeToHome = path.relative(home, key);
+  if (relativeToHome && !relativeToHome.startsWith('..') && !path.isAbsolute(relativeToHome)) {
+    const hiddenSegment = relativeToHome.split(path.sep).find((segment) => segment.startsWith('.') && segment !== '.');
+    if (hiddenSegment) return `hidden home directory ${hiddenSegment}`;
+  }
+  return '';
+}
+
+function isDefaultBlockedWideRoot(key) {
+  const slashKey = key.replace(/\\/g, '/');
+  return (
+    /^[a-z]:$/i.test(slashKey) ||
+    /^\/media\/[^/]+\/[^/]+$/i.test(slashKey) ||
+    /^\/run\/media\/[^/]+\/[^/]+$/i.test(slashKey) ||
+    /^\/mnt\/[^/]+$/i.test(slashKey) ||
+    /^\/volumes\/[^/]+$/i.test(slashKey)
+  );
 }
 
 function main() {
@@ -675,9 +872,17 @@ function main() {
   if (failed.length > 0) process.exitCode = 1;
 }
 
-try {
-  main();
-} catch (err) {
-  process.stderr.write(`machine-memory setup failed: ${err.message}\n`);
-  process.exit(1);
-}
+if (require.main === module) {
+  try {
+    main();
+  } catch (err) {
+    process.stderr.write(`machine-memory setup failed: ${err.message}\n`);
+    process.exit(1);
+  }
+} else {
+	  module.exports = {
+	    isGbrainServeProcess,
+	    shellWords,
+	    terminateServe,
+	  };
+	}

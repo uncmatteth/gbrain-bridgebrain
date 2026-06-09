@@ -8,6 +8,9 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const defaultUpstreamRepo = 'https://github.com/garrytan/gbrain.git';
+const secretKeyPatternSource = 'token|secret|password|cookie|api[_-]?key|authorization|credential|bearer|client[_-]?secret|service[_-]?role(?:[_-]?key)?|private[_-]?key|access[_-]?key|jwt|pat';
+const secretKeyPattern = new RegExp(secretKeyPatternSource, 'i');
+const secretQueryValuePattern = new RegExp(`([?&][^=&#?\\s]*(?:${secretKeyPatternSource})[^=&#?\\s]*=)[^&#\\s]+`, 'gi');
 
 function usage() {
   return [
@@ -72,12 +75,21 @@ function parseArgs(argv) {
   return opts;
 }
 
-function commandFor(name) {
-  if (process.platform !== 'win32') return name;
+function commandFor(name, platform = process.platform) {
+  if (platform !== 'win32') return name;
   if (path.basename(name).includes('.')) return name;
   if (name === 'npm') return 'npm.cmd';
   if (name === 'gbrain') return 'gbrain.cmd';
   return name;
+}
+
+function redactString(value) {
+  return String(value || '')
+    .replace(/\/v1\/t\/[^/\s?#]+/g, '/v1/t/<redacted>')
+    .replace(secretQueryValuePattern, '$1<redacted>')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer <redacted>')
+    .replace(/([a-z][a-z0-9+.-]*:\/\/)([^/@\s]+)@/gi, '$1<redacted>@')
+    .replace(/(bearer\s+)[A-Za-z0-9._~+/=-]+/gi, '$1<redacted>');
 }
 
 function runCapture(cmd, args, options = {}) {
@@ -99,9 +111,9 @@ function runCapture(cmd, args, options = {}) {
 
 function requireOk(label, result) {
   if (result.status === 0 && !result.error) return;
-  const text = `${result.stdout}\n${result.stderr}\n${result.error || ''}`.trim();
+  const text = redactString(`${result.stdout}\n${result.stderr}\n${result.error || ''}`.trim());
   const snippet = text ? `\n${text.slice(0, 2000)}` : '';
-  throw new Error(`${label} failed: ${result.command}${snippet}`);
+  throw new Error(`${label} failed: ${redactString(result.command)}${snippet}`);
 }
 
 function parseJsonOutput(label, text) {
@@ -125,7 +137,7 @@ function defaultStateFile() {
 }
 
 function defaultBackupDir() {
-  return path.join(gbrainDataDir(), 'backups');
+  return path.join(gbrainParentDir(), '.bridgebrain-gbrain-backups');
 }
 
 function isInside(parent, candidate) {
@@ -134,26 +146,132 @@ function isInside(parent, candidate) {
 }
 
 function assertOutsideRepo(label, candidate) {
-  if (isInside(root, candidate)) {
+  const lexical = path.resolve(candidate);
+  const resolved = resolveForSafety(candidate);
+  if (isInside(root, lexical) || isInside(root, resolved)) {
     throw new Error(`${label} must be outside this repo: ${candidate}`);
   }
+  return resolved;
+}
+
+function resolveForSafety(candidate) {
+  const resolved = path.resolve(candidate);
+  let current = resolved;
+  const suffix = [];
+  while (!fs.existsSync(current)) {
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    suffix.unshift(path.basename(current));
+    current = parent;
+  }
+  const base = fs.realpathSync.native(current);
+  return suffix.length ? path.join(base, ...suffix) : base;
+}
+
+function backupBaseDir() {
+  return path.resolve(process.env.GBRAIN_BACKUP_DIR || defaultBackupDir());
+}
+
+function validateApplyPaths(opts) {
+  const stateFile = resolveStateFile(opts);
+  const backupBase = backupBaseDir();
+  const resolvedStateFile = assertOutsideRepo('update state file', stateFile);
+  const resolvedBackupBase = assertOutsideRepo('backup directory', backupBase);
+  const resolvedGbrainData = resolveForSafety(gbrainDataDir());
+  if (opts.fullDataBackup && isInside(resolvedGbrainData, resolvedBackupBase)) {
+    throw new Error(`full-data backup directory must be outside the GBrain data directory: ${backupBase}`);
+  }
+  return { stateFile: resolvedStateFile, backupBase: resolvedBackupBase };
+}
+
+function resolveStateFile(opts = {}) {
+  const stateFile = path.resolve(opts.stateFile || defaultStateFile());
+  assertOutsideRepo('update state file', stateFile);
+  assertAllowedStateFile(stateFile);
+  return stateFile;
+}
+
+function assertAllowedStateFile(stateFile) {
+  const base = path.basename(stateFile);
+  if (
+    base === 'config.json' ||
+    /\.(?:sqlite3?|db|pglite)$/i.test(base) ||
+    /\.(?:sqlite3?|sqlite|db)-(?:wal|shm|journal)$/i.test(base) ||
+    /\.(?:sqlite3?|sqlite|db)\.(?:wal|shm|journal)$/i.test(base)
+  ) {
+    throw new Error(`update state file must not be a private config or database path: ${stateFile}`);
+  }
+  if (!fs.existsSync(stateFile) || path.resolve(stateFile) === path.resolve(defaultStateFile())) return;
+  const parsed = parseStateFile(stateFile);
+  if (parsed.bridgebrain_update_state !== true) {
+    throw new Error(`custom update state file already exists but is not a BridgeBrain update-state file: ${stateFile}`);
+  }
+}
+
+function parseStateFile(stateFile) {
+  let parsed;
+  try {
+    parsed = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  } catch (err) {
+    throw new Error(`could not read update state ${stateFile}: ${err.message}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`update state must be a JSON object: ${stateFile}`);
+  }
+  return parsed;
 }
 
 function readState(stateFile) {
   if (!fs.existsSync(stateFile)) return {};
-  try {
-    return JSON.parse(fs.readFileSync(stateFile, 'utf8'));
-  } catch (err) {
-    throw new Error(`could not read update state ${stateFile}: ${err.message}`);
-  }
+  assertAllowedStateFile(stateFile);
+  return parseStateFile(stateFile);
 }
 
 function writeJsonAtomic(file, data) {
   assertOutsideRepo('update state file', file);
+  assertAllowedStateFile(file);
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(data, null, 2)}\n`, { mode: 0o600 });
+  fs.writeFileSync(tmp, `${JSON.stringify({ ...data, bridgebrain_update_state: true }, null, 2)}\n`, { mode: 0o600 });
   fs.renameSync(tmp, file);
+}
+
+function acquireUpdateLock(stateFile) {
+  const lockDirs = [...new Set([installUpdateLockDir(), stateFileUpdateLockDir(stateFile)])];
+  const acquired = [];
+  try {
+    for (const lockDir of lockDirs) {
+      fs.mkdirSync(path.dirname(lockDir), { recursive: true, mode: 0o700 });
+      fs.mkdirSync(lockDir, { mode: 0o700 });
+      fs.writeFileSync(path.join(lockDir, 'owner.json'), `${JSON.stringify({
+        pid: process.pid,
+        created_at: new Date().toISOString(),
+        state_file: stateFile,
+      }, null, 2)}\n`, { mode: 0o600 });
+      acquired.push(lockDir);
+    }
+  } catch (error) {
+    for (const lockDir of acquired.reverse()) {
+      fs.rmSync(lockDir, { recursive: true, force: true });
+    }
+    if (error.code === 'EEXIST') {
+      throw new Error('another GBrain update apply appears to be running');
+    }
+    throw error;
+  }
+  return () => {
+    for (const lockDir of acquired.reverse()) {
+      fs.rmSync(lockDir, { recursive: true, force: true });
+    }
+  };
+}
+
+function installUpdateLockDir() {
+  return `${defaultStateFile()}.lock`;
+}
+
+function stateFileUpdateLockDir(stateFile) {
+  return `${stateFile}.lock`;
 }
 
 function readGbrainVersion(gbrainBin) {
@@ -172,7 +290,7 @@ function readNativeUpdate(gbrainBin) {
   if (native.status !== 0 || native.error) {
     return {
       ok: false,
-      error: `${native.stderr || native.stdout || native.error || 'gbrain check-update failed'}`.trim(),
+      error: redactString(`${native.stderr || native.stdout || native.error || 'gbrain check-update failed'}`.trim()),
     };
   }
   try {
@@ -199,8 +317,8 @@ function readUpstreamHead(gitBin, repo) {
 }
 
 function updateRecommendation(report) {
-  if (report.lastAppliedUpstreamHead && report.lastAppliedUpstreamHead === report.upstreamHead) {
-    return 'Already applied according to local BridgeBrain state.';
+  if (report.lastUpgradeAttemptedUpstreamHead && report.lastUpgradeAttemptedUpstreamHead === report.upstreamHead) {
+    return 'This upstream commit was already attempted locally. Re-run apply only after reviewing the installed GBrain version and doctor output.';
   }
   if (report.nativeUpdate && report.nativeUpdate.ok && report.nativeUpdate.data && report.nativeUpdate.data.update_available) {
     return 'GBrain reports a version update. Review, then run npm run gbrain:update:apply.';
@@ -221,13 +339,14 @@ function checkForUpdate(opts = {}) {
   const gbrainBin = process.env.GBRAIN_BIN || 'gbrain';
   const gitBin = process.env.GIT_BIN || 'git';
   const repo = process.env.GBRAIN_UPSTREAM_REPO || defaultUpstreamRepo;
-  const stateFile = path.resolve(opts.stateFile || defaultStateFile());
+  const stateFile = resolveStateFile(opts);
   const state = readState(stateFile);
   const version = readGbrainVersion(gbrainBin);
   const nativeUpdate = readNativeUpdate(gbrainBin);
   const upstreamHead = readUpstreamHead(gitBin, repo);
   const previousSeenUpstreamHead = state.last_seen_upstream_head || null;
   const lastAppliedUpstreamHead = state.last_applied_upstream_head || null;
+  const lastUpgradeAttemptedUpstreamHead = state.last_upgrade_attempted_upstream_head || null;
   const now = new Date().toISOString();
   const stateWritten = !!opts.writeState;
 
@@ -237,26 +356,38 @@ function checkForUpdate(opts = {}) {
     gbrainBin,
     gbrainVersion: version.version,
     gbrainVersionRaw: version.raw,
-    upstreamRepo: repo,
+    upstreamRepo: redactString(repo),
     upstreamHead,
     stateFile,
     previousSeenUpstreamHead,
     lastAppliedUpstreamHead,
+    lastUpgradeAttemptedUpstreamHead,
     newSinceLastCheck: previousSeenUpstreamHead ? previousSeenUpstreamHead !== upstreamHead : null,
     nativeUpdate,
     stateWritten,
   };
+  Object.defineProperty(report, 'upstreamRepoRaw', {
+    value: repo,
+    enumerable: false,
+    configurable: true,
+  });
   report.recommendation = updateRecommendation(report);
 
   if (opts.writeState) {
-    writeJsonAtomic(stateFile, {
-      ...state,
-      last_checked_at: now,
-      last_seen_upstream_repo: repo,
-      last_seen_upstream_head: upstreamHead,
-      last_seen_gbrain_version: version.version,
-      previous_seen_upstream_head: previousSeenUpstreamHead,
-    });
+    const releaseLock = acquireUpdateLock(stateFile);
+    try {
+      const freshState = readState(stateFile);
+      writeJsonAtomic(stateFile, {
+        ...freshState,
+        last_checked_at: now,
+        last_seen_upstream_repo: redactString(repo),
+        last_seen_upstream_head: upstreamHead,
+        last_seen_gbrain_version: version.version,
+        previous_seen_upstream_head: freshState.last_seen_upstream_head || previousSeenUpstreamHead,
+      });
+    } finally {
+      releaseLock();
+    }
   }
 
   return report;
@@ -268,14 +399,14 @@ function flattenDoctorChecks(parsed) {
     return checks.map((check, index) => ({
       name: check.name || check.id || check.key || `check_${index}`,
       status: String(check.status || check.result || '').toLowerCase(),
-      message: check.message || check.summary || check.reason || '',
+      message: redactString(check.message || check.summary || check.reason || ''),
     }));
   }
   if (checks && typeof checks === 'object') {
     return Object.entries(checks).map(([name, check]) => ({
       name,
       status: String((check && (check.status || check.result)) || '').toLowerCase(),
-      message: (check && (check.message || check.summary || check.reason)) || '',
+      message: redactString((check && (check.message || check.summary || check.reason)) || ''),
     }));
   }
   return [];
@@ -285,21 +416,24 @@ function summarizeDoctor(parsed) {
   const status = String(parsed.status || parsed.overallStatus || parsed.overall_status || '').toLowerCase();
   const checks = flattenDoctorChecks(parsed);
   const failures = checks.filter((check) => ['fail', 'failed', 'error', 'critical', 'unhealthy'].includes(check.status));
+  const passingStatuses = new Set(['ok', 'pass', 'passed', 'healthy', 'skipped', 'skip', 'disabled', 'n/a']);
   const healthyStatuses = new Set(['healthy', 'ok', 'pass', 'passed']);
   const unhealthyStatuses = new Set(['unhealthy', 'fail', 'failed', 'error', 'critical']);
+  const unknowns = checks.filter((check) => !passingStatuses.has(check.status) && !failures.includes(check));
   let healthy;
   if (unhealthyStatuses.has(status)) {
     healthy = false;
   } else if (healthyStatuses.has(status)) {
-    healthy = failures.length === 0;
+    healthy = checks.length > 0 && failures.length === 0 && unknowns.length === 0;
   } else {
-    healthy = failures.length === 0;
+    healthy = false;
   }
   return {
     status: status || 'unknown',
     healthy,
     failureCount: failures.length,
-    failures: failures.slice(0, 8),
+    unknownCount: unknowns.length,
+    failures: [...failures, ...unknowns].slice(0, 8),
   };
 }
 
@@ -348,16 +482,54 @@ function backupFilter(sourceRoot, candidate) {
   return true;
 }
 
-function isSecretKey(key) {
-  return /token|secret|password|cookie|api[_-]?key|authorization|credential|bearer|client[_-]?secret|service[_-]?role|private[_-]?key|access[_-]?key|jwt|pat/i.test(String(key));
+function liveDataIndicators(sourceRoot) {
+  if (!fs.existsSync(sourceRoot)) return [];
+  const hits = [];
+  const stack = [sourceRoot];
+  while (stack.length > 0 && hits.length < 20) {
+    const dir = stack.pop();
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      const base = entry.name.toLowerCase();
+      if (base === 'bridgebrain-gbrain-update-state.json.lock') {
+        continue;
+      }
+      if (
+        base === 'postmaster.pid' ||
+        base === 'pglite.lock' ||
+        base === 'lock' ||
+        base.endsWith('.pid') ||
+        base.endsWith('.lock') ||
+        /\.(?:sqlite|sqlite3|db)-(?:wal|shm|journal)$/i.test(base) ||
+        /\.(?:sqlite|sqlite3|db)\.(?:wal|shm|journal)$/i.test(base)
+      ) {
+        hits.push(path.relative(sourceRoot, full) || entry.name);
+        if (hits.length >= 20) break;
+      }
+      if (entry.isDirectory() && !['backups', 'node_modules', '.git'].includes(base)) {
+        stack.push(full);
+      }
+    }
+  }
+  return hits;
 }
 
-function redactString(value) {
-  return String(value)
-    .replace(/\/v1\/t\/[^/\s?#]+/g, '/v1/t/<redacted>')
-    .replace(/([?&][^=&#?\s]*(?:token|secret|password|cookie|api[_-]?key|authorization|credential|bearer|client[_-]?secret)[^=&#?\s]*=)[^&#\s]+/gi, '$1<redacted>')
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer <redacted>')
-    .replace(/([a-z][a-z0-9+.-]*:\/\/)([^/@\s]+)@/gi, '$1<redacted>@');
+function assertFullDataBackupConsistent(sourceRoot) {
+  const hits = liveDataIndicators(sourceRoot);
+  if (hits.length > 0) {
+    throw new Error(`full-data backup refused while live database indicators exist: ${hits.join(', ')}`);
+  }
+  return { liveDataIndicators: [] };
+}
+
+function isSecretKey(key) {
+  return secretKeyPattern.test(String(key));
 }
 
 function redactConfig(value, key = '') {
@@ -385,6 +557,10 @@ function safeConfigSummary(config) {
   return summary;
 }
 
+function safeUpdateStateSummary(state) {
+  return redactConfig(state);
+}
+
 function writeMetadataBackup(sourceDir, backupDir, stateFile) {
   const files = [];
   const configFile = path.join(sourceDir, 'config.json');
@@ -407,70 +583,119 @@ function writeMetadataBackup(sourceDir, backupDir, stateFile) {
     }
   }
   if (stateFile && fs.existsSync(stateFile)) {
-    fs.copyFileSync(stateFile, path.join(backupDir, 'update-state-before.json'));
-    files.push('update-state-before.json');
+    try {
+      const parsed = parseStateFile(stateFile);
+      fs.writeFileSync(
+        path.join(backupDir, 'update-state-before.json'),
+        `${JSON.stringify(safeUpdateStateSummary(parsed), null, 2)}\n`,
+        { mode: 0o600 },
+      );
+      files.push('update-state-before.json');
+    } catch (err) {
+      fs.writeFileSync(
+        path.join(backupDir, 'update-state-before.error.txt'),
+        'Could not parse update state for redacted backup. Raw update state was not copied.\n',
+        { mode: 0o600 },
+      );
+      files.push('update-state-before.error.txt');
+    }
   }
   return files;
 }
 
 function createBackup(meta, opts = {}) {
   const sourceDir = gbrainDataDir();
-  const backupBase = path.resolve(process.env.GBRAIN_BACKUP_DIR || defaultBackupDir());
-  assertOutsideRepo('backup directory', backupBase);
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const backupDir = path.join(backupBase, `bridgebrain-gbrain-update-${stamp}`);
-  const snapshotDir = path.join(backupDir, 'gbrain-home-snapshot');
-  fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
-
-  const metadataFiles = writeMetadataBackup(sourceDir, backupDir, opts.stateFile);
-  let snapshotCopied = false;
-  if (opts.fullDataBackup && fs.existsSync(sourceDir)) {
-    fs.cpSync(sourceDir, snapshotDir, {
-      recursive: true,
-      force: false,
-      errorOnExist: true,
-      filter: (candidate) => backupFilter(sourceDir, candidate),
-    });
-    snapshotCopied = true;
+  const backupBase = path.resolve(opts.backupBase || backupBaseDir());
+  const resolvedBackupBase = assertOutsideRepo('backup directory', backupBase);
+  const resolvedSourceDir = resolveForSafety(sourceDir);
+  if (opts.fullDataBackup && isInside(resolvedSourceDir, resolvedBackupBase)) {
+    throw new Error(`full-data backup directory must be outside the GBrain data directory: ${backupBase}`);
   }
-
-  const manifest = {
-    created_at: new Date().toISOString(),
-    purpose: 'BridgeBrain guarded GBrain update backup',
-    gbrain_parent_dir: gbrainParentDir(),
-    gbrain_data_dir: sourceDir,
-    backup_scope: opts.fullDataBackup ? 'full-private-gbrain-home' : 'metadata-redacted-only',
-    full_data_backup: !!opts.fullDataBackup,
-    metadata_files: metadataFiles,
-    snapshot_copied: snapshotCopied,
-    snapshot_note: opts.fullDataBackup
-      ? 'Full .gbrain snapshot was explicitly requested. Keep this backup private.'
-      : 'Default backup avoids copying GBrain databases, local memory, and raw provider tokens.',
-    ...meta,
-  };
-  fs.writeFileSync(path.join(backupDir, 'backup-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
-  return {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const backupDir = path.join(resolvedBackupBase, `bridgebrain-gbrain-update-${stamp}`);
+  const snapshotDir = path.join(backupDir, 'gbrain-home-snapshot');
+  const partial = {
     backupDir,
-    backupScope: manifest.backup_scope,
-    fullDataBackup: manifest.full_data_backup,
-    metadataFiles,
-    snapshotCopied,
+    backupScope: opts.fullDataBackup ? 'full-private-gbrain-home' : 'metadata-redacted-only',
+    fullDataBackup: !!opts.fullDataBackup,
+    metadataFiles: [],
+    snapshotCopied: false,
+    consistencyGate: null,
   };
+
+  try {
+    fs.mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    partial.metadataFiles = writeMetadataBackup(sourceDir, backupDir, opts.stateFile);
+    if (opts.fullDataBackup && fs.existsSync(sourceDir)) {
+      partial.consistencyGate = assertFullDataBackupConsistent(sourceDir);
+      fs.cpSync(sourceDir, snapshotDir, {
+        recursive: true,
+        force: false,
+        errorOnExist: true,
+        filter: (candidate) => backupFilter(sourceDir, candidate),
+      });
+      partial.snapshotCopied = true;
+    }
+
+    const manifest = {
+      created_at: new Date().toISOString(),
+      purpose: 'BridgeBrain guarded GBrain update backup',
+      gbrain_parent_dir: gbrainParentDir(),
+      gbrain_data_dir: sourceDir,
+      backup_scope: partial.backupScope,
+      full_data_backup: partial.fullDataBackup,
+      metadata_files: partial.metadataFiles,
+      snapshot_copied: partial.snapshotCopied,
+      consistency_gate: partial.consistencyGate || null,
+      snapshot_note: opts.fullDataBackup
+        ? 'Full .gbrain snapshot was explicitly requested. Keep this backup private.'
+        : 'Default backup avoids copying GBrain databases, local memory, and raw provider tokens.',
+      ...meta,
+    };
+    fs.writeFileSync(path.join(backupDir, 'backup-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, { mode: 0o600 });
+    return partial;
+  } catch (error) {
+    error.backup = partial;
+    throw error;
+  }
+}
+
+function writeAttemptState(stateFile, report, versionBefore, backup, status) {
+  const state = readState(stateFile);
+  writeJsonAtomic(stateFile, {
+    ...state,
+    last_checked_at: new Date().toISOString(),
+    last_attempted_at: new Date().toISOString(),
+    last_apply_status: status,
+    last_seen_upstream_repo: redactString(report.upstreamRepoRaw || report.upstreamRepo),
+    last_seen_upstream_head: report.upstreamHead,
+    last_upgrade_attempted_upstream_head: report.upstreamHead,
+    last_seen_gbrain_version: versionBefore,
+    last_backup_dir: backup.backupDir,
+    last_backup_scope: backup.backupScope,
+  });
 }
 
 function applyUpdate(opts) {
   const steps = [];
   let backup = null;
+  let releaseLock = null;
   const gbrainBin = process.env.GBRAIN_BIN || 'gbrain';
   const npmBin = process.env.NPM_BIN || 'npm';
   const patchScript = path.resolve(process.env.BRIDGEBRAIN_UPDATE_PATCH_SCRIPT || path.join(root, 'scripts', 'patch-gbrain-litellm.js'));
-  const report = checkForUpdate({ ...opts, writeState: false });
-
-  if (!opts.force && report.lastAppliedUpstreamHead && report.lastAppliedUpstreamHead === report.upstreamHead) {
-    throw new Error('local BridgeBrain state says this upstream commit was already applied. Use --force only after review.');
-  }
+  const pathPlan = validateApplyPaths(opts);
 
   try {
+    releaseLock = acquireUpdateLock(pathPlan.stateFile);
+    const report = checkForUpdate({ ...opts, writeState: false, stateFile: pathPlan.stateFile });
+    if (
+      !opts.force &&
+      report.upstreamHead &&
+      (report.lastUpgradeAttemptedUpstreamHead === report.upstreamHead || report.lastAppliedUpstreamHead === report.upstreamHead)
+    ) {
+      throw new Error(`upstream ${report.upstreamHead} was already attempted locally; pass --force to rerun apply`);
+    }
+
     const versionBefore = report.gbrainVersion;
     const preDoctor = runDoctorGate('pre-upgrade gbrain doctor', { allowUnhealthy: opts.allowUnhealthyBefore });
     steps.push({ label: 'pre-upgrade gbrain doctor', status: preDoctor.healthy ? 'ok' : 'allowed-unhealthy', doctor: preDoctor });
@@ -478,7 +703,7 @@ function applyUpdate(opts) {
     runRepoStep('pre-upgrade adapter tests', npmBin, ['test'], 120_000, opts, steps);
     runRepoStep('pre-upgrade package guard', npmBin, ['run', 'package:guard'], 120_000, opts, steps);
 
-    const stateFile = path.resolve(opts.stateFile || defaultStateFile());
+    const stateFile = pathPlan.stateFile;
     backup = createBackup({
       gbrain_version_before: versionBefore,
       upstream_repo: report.upstreamRepo,
@@ -486,6 +711,7 @@ function applyUpdate(opts) {
     }, {
       fullDataBackup: opts.fullDataBackup,
       stateFile,
+      backupBase: pathPlan.backupBase,
     });
     steps.push({
       label: 'local update backup',
@@ -494,6 +720,8 @@ function applyUpdate(opts) {
       backupScope: backup.backupScope,
       snapshotCopied: backup.snapshotCopied,
     });
+
+    writeAttemptState(stateFile, report, versionBefore, backup, 'attempted');
 
     runRepoStep('gbrain upgrade', gbrainBin, ['upgrade'], 600_000, opts, steps);
     runRepoStep('reapply BridgeBrain LiteLLM patch', process.execPath, [patchScript], 120_000, opts, steps);
@@ -509,8 +737,10 @@ function applyUpdate(opts) {
       ...state,
       last_checked_at: new Date().toISOString(),
       last_applied_at: new Date().toISOString(),
+      last_apply_status: 'applied',
       last_seen_upstream_repo: report.upstreamRepo,
       last_seen_upstream_head: report.upstreamHead,
+      last_upgrade_attempted_upstream_head: report.upstreamHead,
       last_applied_upstream_head: report.upstreamHead,
       last_seen_gbrain_version: versionAfter,
       last_applied_gbrain_version: versionAfter,
@@ -533,6 +763,8 @@ function applyUpdate(opts) {
     if (backup) err.backup = backup;
     err.steps = steps;
     throw err;
+  } finally {
+    if (releaseLock) releaseLock();
   }
 }
 
@@ -575,12 +807,12 @@ function main() {
     }
   } catch (err) {
     if (opts && opts.json) {
-      const failure = { status: 'failed', error: err.message };
+      const failure = { status: 'failed', error: redactString(err.message) };
       if (err.backup) failure.backup = err.backup;
       if (err.steps) failure.steps = err.steps;
       process.stdout.write(`${JSON.stringify(failure, null, 2)}\n`);
     } else {
-      process.stderr.write(`${err.message}\n`);
+      process.stderr.write(`${redactString(err.message)}\n`);
       if (err.backup) {
         process.stderr.write(`Backup: ${err.backup.backupDir}\n`);
       }
@@ -590,4 +822,10 @@ function main() {
   }
 }
 
-main();
+if (require.main === module) {
+  main();
+} else {
+  module.exports = {
+    commandFor,
+  };
+}

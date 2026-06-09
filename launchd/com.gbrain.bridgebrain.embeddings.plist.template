@@ -31,6 +31,8 @@
     <string>@MODEL_NAME@</string>
     <key>BRIDGEBRAIN_API_TOKEN</key>
     <string>@API_TOKEN@</string>
+    <key>BRIDGEBRAIN_ALLOW_PATH_TOKEN</key>
+    <string>1</string>
     <key>CODEX_HOME</key>
     <string>@CODEX_HOME@</string>
     <key>BRIDGE_SCRIPT</key>

@@ -48,11 +48,13 @@ Check the target machine before installing:
 
 If Node, Codex, or Bun is missing, install them with the target platform's normal package manager or official installer. Do not download random scripts, scrape browser state, or copy tools from another machine.
 
-Use `--install-gbrain` only when Bun is already installed:
+Use `--install-gbrain` only when GBrain is missing, Bun is already installed, and the user explicitly wants the installer to install GBrain:
 
 ```bash
 scripts/install.sh --install-gbrain
 ```
+
+The installer pins the default GBrain source. Override `GBRAIN_INSTALL_SPEC` only after reviewing the target tag or commit.
 
 Windows PowerShell:
 
@@ -64,16 +66,16 @@ If GBrain is missing and Bun is not installed, stop and report that Bun must be 
 
 ## Normal Install
 
-After preflight passes and prerequisites are present:
+After preflight passes and GBrain is already installed:
 
 ```bash
-scripts/install.sh --install-gbrain
+scripts/install.sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-.\scripts\install.ps1 -InstallGBrain
+.\scripts\install.ps1
 ```
 
 The installer copies the bundled bridge skill into the current user's Codex home, installs the local embedding service, patches GBrain's LiteLLM compatibility check, writes GBrain provider config, starts the platform service, and runs verification.
