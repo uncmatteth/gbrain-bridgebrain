@@ -282,8 +282,8 @@ fi
 if [[ "$PROFILE" != "mock" && "$SKIP_BRIDGE" -ne 1 ]]; then
   need_cmd codex "$CODEX_BIN"
   [[ -f "$BRIDGE_SCRIPT" ]] || fail "bridge script missing at $BRIDGE_SCRIPT"
-  echo "Checking ChatGPT web-login bridge..."
-  GPT_WEB_LOGIN_CODEX_BIN="$CODEX_BIN" "$NODE_BIN" "$BRIDGE_SCRIPT" status
+  echo "Checking ChatGPT web-login bridge smoke..."
+  GPT_WEB_LOGIN_CODEX_BIN="$CODEX_BIN" "$NODE_BIN" "$BRIDGE_SCRIPT" smoke
 fi
 
 echo "Checking local embedding service..."

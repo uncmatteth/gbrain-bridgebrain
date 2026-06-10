@@ -40,6 +40,12 @@ if [[ "\${1:-}" == "doctor" ]]; then
   printf '%s\\n' '{"checks":{"auth.credentials":{"status":"ok","details":{"stored auth mode":"chatgpt","stored ChatGPT tokens":"true","stored API key":"false"}}},"overallStatus":"ok"}'
   exit 0
 fi
+if [[ "\${1:-}" == "exec" ]]; then
+  cat >/dev/null
+  printf '%s\\n' '{"type":"thread.started","thread_id":"installer-smoke"}'
+  printf '%s\\n' '{"type":"item.completed","item":{"type":"agent_message","text":"GPT_WEB_LOGIN_BRIDGE_OK"}}'
+  exit 0
+fi
 echo "unexpected fake-codex args: $*" >&2
 exit 2
 `);
@@ -764,7 +770,7 @@ exit 0
     fail('install.ps1 must define Fail exactly once before early validation');
   }
   if (!verifyPs1.includes('Join-Path $GbrainConfigDir "config.json"')) fail('verify.ps1 must use GBRAIN_HOME/.gbrain config path');
-  if (!verifyPs1.includes('$env:GPT_WEB_LOGIN_CODEX_BIN = $CodexBin')) fail('verify.ps1 does not honor CODEX_BIN for bridge status');
+  if (!verifyPs1.includes('$env:GPT_WEB_LOGIN_CODEX_BIN = $CodexBin')) fail('verify.ps1 does not honor CODEX_BIN for bridge smoke');
   if (!verifyPs1.includes('BRIDGEBRAIN_VERIFY_ALLOW_REMOTE')) fail('verify.ps1 must reject non-loopback provider URLs by default');
 	  if (!verifyPs1.includes('remote provider URLs must use https when credentials would be sent')) {
 	    fail('verify.ps1 must reject remote HTTP credential-bearing provider URLs');
