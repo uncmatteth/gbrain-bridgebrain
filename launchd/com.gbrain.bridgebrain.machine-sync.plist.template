@@ -9,7 +9,7 @@
   <array>
     <string>@NODE_BIN@</string>
     <string>@CODEX_HOME@/services/gbrain-machine-memory/setup-machine-memory.js</string>
-    <string>sync-once</string>
+    <string>sync</string>
   </array>
 
   <key>RunAtLoad</key>
@@ -36,10 +36,6 @@
     <string>@MACHINE_ROOTS@</string>
     <key>GBRAIN_MACHINE_TERMINATE_SERVE</key>
     <string>@TERMINATE_SERVE@</string>
-    <key>GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS</key>
-    <string>@SYNC_TIMEOUT_SECONDS@</string>
-    <key>GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS</key>
-    <string>@GBRAIN_TIMEOUT_SECONDS@</string>
   </dict>
 
   <key>StandardOutPath</key>

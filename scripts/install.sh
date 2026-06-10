@@ -24,8 +24,6 @@ MACHINE_MEMORY_ROOTS="${GBRAIN_MACHINE_ROOTS:-}"
 MACHINE_MEMORY_UNLOCK="${BRIDGEBRAIN_ENABLE_MACHINE_MEMORY:-}"
 MACHINE_MEMORY_ALLOW_WIDE_ROOTS="${BRIDGEBRAIN_ALLOW_WIDE_MACHINE_MEMORY_ROOTS:-}"
 MACHINE_MEMORY_TERMINATE_SERVE="${GBRAIN_MACHINE_TERMINATE_SERVE:-none}"
-MACHINE_MEMORY_SYNC_TIMEOUT_SECONDS="${GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS:-600}"
-MACHINE_MEMORY_GBRAIN_TIMEOUT_SECONDS="${GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS:-}"
 GBRAIN_INSTALL_SPEC="${GBRAIN_INSTALL_SPEC:-github:garrytan/gbrain#1eb430a2df9f842a754dd6af9910f049ccac65a1}"
 INSTALL_GBRAIN=0
 SKIP_SERVICE=0
@@ -152,14 +150,6 @@ validate_machine_memory_request() {
     *) fail "GBRAIN_MACHINE_TERMINATE_SERVE must be none or all." ;;
   esac
   positive_int GBRAIN_MACHINE_SYNC_INTERVAL_SECONDS "$MACHINE_MEMORY_INTERVAL_SECONDS"
-  positive_int GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS "$MACHINE_MEMORY_SYNC_TIMEOUT_SECONDS"
-  if [[ -n "$MACHINE_MEMORY_GBRAIN_TIMEOUT_SECONDS" ]]; then
-    positive_int GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS "$MACHINE_MEMORY_GBRAIN_TIMEOUT_SECONDS"
-    if (( MACHINE_MEMORY_GBRAIN_TIMEOUT_SECONDS >= MACHINE_MEMORY_SYNC_TIMEOUT_SECONDS )); then
-      fail "GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS must be lower than GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS."
-    fi
-  fi
-
   local root resolved home_resolved home_parent fs_root private_reason
   VALIDATED_MACHINE_MEMORY_ROOTS=()
   home_resolved="$(normalize_existing_or_raw "$HOME")"
@@ -352,7 +342,6 @@ Install embedding service: $([[ "$SKIP_SERVICE" -eq 1 ]] && echo "no" || echo "y
 Run verify: $([[ "$SKIP_VERIFY" -eq 1 ]] && echo "no" || echo "yes")
 Machine memory: $([[ "$SETUP_MACHINE_MEMORY" -eq 1 ]] && echo "yes" || echo "no")
 Machine memory roots: ${MACHINE_MEMORY_ROOTS:-<unset>}
-Machine memory gbrain timeout: ${MACHINE_MEMORY_GBRAIN_TIMEOUT_SECONDS:-<timeout minus 30s>}
 Machine memory sync now: $([[ "$MACHINE_MEMORY_SYNC_NOW" -eq 1 ]] && echo "yes" || echo "no")
 No files will be written. No services will be loaded or started. No GBrain sources will be registered or synced.
 EOF
@@ -379,8 +368,6 @@ install_machine_memory() {
     MACHINE_MEMORY_ROOTS_SYSTEMD_ESC="$(systemd_exec_escape "$MACHINE_MEMORY_ROOTS")"
     MACHINE_MEMORY_ALLOW_WIDE_ROOTS_SYSTEMD_ESC="$(systemd_exec_escape "$MACHINE_MEMORY_ALLOW_WIDE_ROOTS")"
     MACHINE_MEMORY_TERMINATE_SERVE_SYSTEMD_ESC="$(systemd_exec_escape "$MACHINE_MEMORY_TERMINATE_SERVE")"
-    MACHINE_MEMORY_SYNC_TIMEOUT_SECONDS_SYSTEMD_ESC="$(systemd_exec_escape "$MACHINE_MEMORY_SYNC_TIMEOUT_SECONDS")"
-    MACHINE_MEMORY_GBRAIN_TIMEOUT_SECONDS_SYSTEMD_ESC="$(systemd_exec_escape "$MACHINE_MEMORY_GBRAIN_TIMEOUT_SECONDS")"
     SERVICE_TMP="$(mktemp "$USER_SYSTEMD_DIR/gbrain-machine-sync.service.XXXXXX")"
     TIMER_TMP="$(mktemp "$USER_SYSTEMD_DIR/gbrain-machine-sync.timer.XXXXXX")"
     chmod 600 "$SERVICE_TMP" "$TIMER_TMP"
@@ -395,8 +382,6 @@ install_machine_memory() {
       -e "s|@GBRAIN_HOME@|$GBRAIN_HOME_SYSTEMD_ESC|g" \
       -e "s|@MACHINE_ROOTS@|$MACHINE_MEMORY_ROOTS_SYSTEMD_ESC|g" \
       -e "s|@TERMINATE_SERVE@|$MACHINE_MEMORY_TERMINATE_SERVE_SYSTEMD_ESC|g" \
-      -e "s|@SYNC_TIMEOUT_SECONDS@|$MACHINE_MEMORY_SYNC_TIMEOUT_SECONDS_SYSTEMD_ESC|g" \
-      -e "s|@GBRAIN_TIMEOUT_SECONDS@|$MACHINE_MEMORY_GBRAIN_TIMEOUT_SECONDS_SYSTEMD_ESC|g" \
       "$ROOT/systemd/gbrain-machine-sync.service.template" > "$SERVICE_TMP"
     sed \
       -e "s|@INTERVAL_SECONDS@|$MACHINE_MEMORY_INTERVAL_SECONDS_ESC|g" \
@@ -424,8 +409,6 @@ install_machine_memory() {
     MACHINE_MEMORY_ALLOW_WIDE_ROOTS_XML_ESC="$(sed_xml_escape "$MACHINE_MEMORY_ALLOW_WIDE_ROOTS")"
     MACHINE_MEMORY_TERMINATE_SERVE_XML_ESC="$(sed_xml_escape "$MACHINE_MEMORY_TERMINATE_SERVE")"
     MACHINE_MEMORY_INTERVAL_SECONDS_XML_ESC="$(sed_xml_escape "$MACHINE_MEMORY_INTERVAL_SECONDS")"
-    MACHINE_MEMORY_SYNC_TIMEOUT_SECONDS_XML_ESC="$(sed_xml_escape "$MACHINE_MEMORY_SYNC_TIMEOUT_SECONDS")"
-    MACHINE_MEMORY_GBRAIN_TIMEOUT_SECONDS_XML_ESC="$(sed_xml_escape "$MACHINE_MEMORY_GBRAIN_TIMEOUT_SECONDS")"
     PLIST_TMP="$(mktemp "$LAUNCHD_DIR/com.gbrain.bridgebrain.machine-sync.XXXXXX")"
     chmod 600 "$PLIST_TMP"
     sed \
@@ -438,8 +421,6 @@ install_machine_memory() {
       -e "s|@GBRAIN_HOME@|$GBRAIN_HOME_XML_ESC|g" \
       -e "s|@MACHINE_ROOTS@|$MACHINE_MEMORY_ROOTS_XML_ESC|g" \
       -e "s|@TERMINATE_SERVE@|$MACHINE_MEMORY_TERMINATE_SERVE_XML_ESC|g" \
-      -e "s|@SYNC_TIMEOUT_SECONDS@|$MACHINE_MEMORY_SYNC_TIMEOUT_SECONDS_XML_ESC|g" \
-      -e "s|@GBRAIN_TIMEOUT_SECONDS@|$MACHINE_MEMORY_GBRAIN_TIMEOUT_SECONDS_XML_ESC|g" \
       -e "s|@INTERVAL_SECONDS@|$MACHINE_MEMORY_INTERVAL_SECONDS_XML_ESC|g" \
       "$ROOT/launchd/com.gbrain.bridgebrain.machine-sync.plist.template" > "$PLIST_TMP"
     mv "$PLIST_TMP" "$PLIST"
@@ -510,8 +491,7 @@ install -m 0644 "$ROOT/bridge-skill/$SKILL_NAME/SKILL.md" "$SKILL_DEST/SKILL.md"
 install -m 0644 "$ROOT/bridge-skill/$SKILL_NAME/agents/openai.yaml" "$SKILL_DEST/agents/openai.yaml"
 install -m 0755 "$ROOT/bridge-skill/$SKILL_NAME/scripts/gpt-web-login-bridge.js" "$SKILL_DEST/scripts/gpt-web-login-bridge.js"
 
-GPT_WEB_LOGIN_CODEX_BIN="$CODEX_BIN" GPT_WEB_LOGIN_CWD="$HOME" \
-  "$NODE_BIN" "$SKILL_DEST/scripts/gpt-web-login-bridge.js" smoke
+"$NODE_BIN" --check "$SKILL_DEST/scripts/gpt-web-login-bridge.js" >/dev/null
 "$NODE_BIN" "$ROOT/scripts/patch-gbrain-litellm.js"
 
 mkdir -p "$GBRAIN_CONFIG_DIR"

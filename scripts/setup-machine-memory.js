@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const DEFAULT_MAX_BUFFER = 64 * 1024 * 1024;
@@ -35,7 +35,7 @@ function usage() {
   process.stdout.write(`BridgeBrain machine-memory setup.
 
 Usage:
-  node scripts/setup-machine-memory.js sync-once [options]
+  node scripts/setup-machine-memory.js sync [options]
   node scripts/setup-machine-memory.js register [options]
   node scripts/setup-machine-memory.js candidates [options]
 
@@ -47,7 +47,7 @@ Options:
   --no-sync               Register only; do not sync.
   --no-pull               Pass --no-pull to gbrain sync. Default on.
   --pull                  Allow gbrain sync to git pull.
-  --no-embed              Pass --no-embed to gbrain sync.
+  --no-embed              Pass --no-embed to gbrain sync. Default off.
   --no-extract            Pass --no-extract to gbrain sync.
   --no-schema-pack        Pass --no-schema-pack to gbrain sync.
   --import-only           Sync import phase only; implies --no-embed,
@@ -56,23 +56,19 @@ Options:
                            Default on; set GBRAIN_MACHINE_SYNC_TRACE=0 to disable.
   --terminate-serve <m>    Before sync: none or all. Default:
                            GBRAIN_MACHINE_TERMINATE_SERVE or none.
-  --timeout-sec <n>        Per-source wrapper watchdog. Default: env or 600.
-  --gbrain-timeout-sec <n> Per-source gbrain graceful timeout. Default:
-                           timeout-sec minus 30.
   --json                  Emit a final JSON summary.
   --dry-run               Print actions without mutating GBrain.
 
 Environment:
   GBRAIN_BIN              gbrain executable path.
   GBRAIN_MACHINE_ROOTS    ${path.delimiter}-separated root list.
-  GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS  Graceful gbrain timeout seconds.
   GBRAIN_MACHINE_SYNC_TRACE              0 disables GBRAIN_SYNC_TRACE.
 `);
 }
 
 function parseArgs(argv) {
   const opts = {
-    command: 'sync-once',
+    command: 'sync',
     roots: null,
     maxDepth: DEFAULT_MAX_DEPTH,
     register: true,
@@ -83,12 +79,6 @@ function parseArgs(argv) {
     noSchemaPack: false,
     trace: process.env.GBRAIN_MACHINE_SYNC_TRACE !== '0',
     terminateServe: process.env.GBRAIN_MACHINE_TERMINATE_SERVE || 'none',
-    timeoutSec: process.env.GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS
-      ? positiveInt(process.env.GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS, 'GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS')
-      : 600,
-    gbrainTimeoutSec: process.env.GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS
-      ? positiveInt(process.env.GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS, 'GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS')
-      : null,
     json: false,
     dryRun: false,
   };
@@ -149,12 +139,6 @@ function parseArgs(argv) {
       case '--terminate-serve':
         opts.terminateServe = args[++i] || '';
         break;
-      case '--timeout-sec':
-        opts.timeoutSec = positiveInt(args[++i], '--timeout-sec');
-        break;
-      case '--gbrain-timeout-sec':
-        opts.gbrainTimeoutSec = positiveInt(args[++i], '--gbrain-timeout-sec');
-        break;
       case '--json':
         opts.json = true;
         break;
@@ -166,7 +150,7 @@ function parseArgs(argv) {
     }
   }
 
-  if (!['sync-once', 'register', 'candidates'].includes(opts.command)) {
+  if (!['sync', 'register', 'candidates'].includes(opts.command)) {
     throw new Error(`Unknown command: ${opts.command}`);
   }
   if (!['none', 'all'].includes(opts.terminateServe)) {
@@ -175,7 +159,6 @@ function parseArgs(argv) {
   if (process.platform === 'win32' && opts.terminateServe !== 'none') {
     throw new Error('--terminate-serve=all is not supported on Windows; stop gbrain serve before scheduled sync or use none');
   }
-  opts.gbrainTimeoutSec = resolveGbrainTimeoutSec(opts);
   return opts;
 }
 
@@ -183,14 +166,6 @@ function positiveInt(raw, name) {
   const n = Number(raw);
   if (!Number.isInteger(n) || n <= 0) throw new Error(`${name} must be a positive integer`);
   return n;
-}
-
-function resolveGbrainTimeoutSec(opts) {
-  const graceful = opts.gbrainTimeoutSec || Math.max(1, opts.timeoutSec - 30);
-  if (graceful >= opts.timeoutSec) {
-    throw new Error('--gbrain-timeout-sec must be lower than --timeout-sec so gbrain can exit before the wrapper watchdog kills it');
-  }
-  return graceful;
 }
 
 function splitPathList(value) {
@@ -344,6 +319,56 @@ function run(command, args, opts = {}) {
 function gbrain(args, opts = {}) {
   const bin = process.env.GBRAIN_BIN || 'gbrain';
   return run(bin, args, opts);
+}
+
+function runGbrainStreaming(args, opts = {}) {
+  const bin = process.env.GBRAIN_BIN || 'gbrain';
+  const resolved = resolveSpawnCommand(bin, args);
+  const env = { ...process.env, GBRAIN_NO_BANNER: '1', ...(opts.env || {}) };
+  const outputLimit = opts.outputLimit || DEFAULT_MAX_BUFFER;
+  let stdout = '';
+  let stderr = '';
+
+  function capture(name, chunk) {
+    const text = chunk.toString();
+    if (name === 'stdout') {
+      stdout += text;
+      if (stdout.length > outputLimit) stdout = stdout.slice(-outputLimit);
+      process.stdout.write(text);
+    } else {
+      stderr += text;
+      if (stderr.length > outputLimit) stderr = stderr.slice(-outputLimit);
+      process.stderr.write(text);
+    }
+  }
+
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(resolved.command, resolved.args, {
+        cwd: opts.cwd || os.homedir(),
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      resolve({ status: 1, stdout, stderr: error.message });
+      return;
+    }
+
+    child.stdout.on('data', (chunk) => capture('stdout', chunk));
+    child.stderr.on('data', (chunk) => capture('stderr', chunk));
+    child.on('error', (error) => {
+      resolve({ status: 1, stdout, stderr: `${stderr}${error.message}` });
+    });
+    child.on('close', (status, signal) => {
+      resolve({
+        status: typeof status === 'number' ? status : 1,
+        signal,
+        stdout,
+        stderr,
+      });
+    });
+  });
 }
 
 function redactString(value) {
@@ -717,7 +742,29 @@ function terminateServe(mode, opts = {}, deps = {}) {
   return candidates.map((proc) => proc.pid);
 }
 
-function syncSources(sources, repoPaths, opts) {
+function formatDuration(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return 'unknown';
+  const totalSeconds = Math.round(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+function estimateRemaining(startedAt, completed, total) {
+  if (completed <= 0) return 'estimating';
+  const elapsed = Date.now() - startedAt;
+  const average = elapsed / completed;
+  return formatDuration(average * Math.max(0, total - completed));
+}
+
+function progressLog(opts, message) {
+  log(`[machine-memory] ${message}`, opts);
+}
+
+async function syncSources(sources, repoPaths, opts) {
   const targetSources = sources
     .filter((source) => sourceLocalPath(source))
     .filter((source) => repoPaths.some((repoPath) => samePath(sourceLocalPath(source), repoPath)));
@@ -771,16 +818,18 @@ function syncSources(sources, repoPaths, opts) {
   }
 
   const results = [...skipped];
-  for (const source of syncable) {
+  const startedAt = Date.now();
+  let completed = 0;
+  progressLog(opts, `sync plan: ${syncable.length} source(s), ${skipped.length} skipped; elapsed=0s remaining=${syncable.length ? 'estimating' : '0s'}`);
+
+  for (let index = 0; index < syncable.length; index++) {
+    const source = syncable[index];
     const id = sourceId(source);
     const localPath = sourceLocalPath(source);
     const args = [
       'sync',
       '--source', id,
-      '--strategy', 'auto',
-      '--timeout', String(opts.gbrainTimeoutSec),
       '--yes',
-      '--json',
     ];
     if (opts.noPull) args.push('--no-pull');
     if (opts.noEmbed) args.push('--no-embed');
@@ -793,35 +842,34 @@ function syncSources(sources, repoPaths, opts) {
         id,
         path: localPath,
         status: 'dry_run',
-        timeoutSec: opts.timeoutSec,
-        gbrainTimeoutSec: opts.gbrainTimeoutSec,
         trace: opts.trace,
         args,
       });
       continue;
     }
 
-    log(`sync ${id} (${localPath}) timeout=${opts.gbrainTimeoutSec}s watchdog=${opts.timeoutSec}s`, opts);
-    const result = gbrain(args, {
+    const sourceStartedAt = Date.now();
+    progressLog(opts, `starting ${index + 1}/${syncable.length}: ${id} (${localPath}); elapsed=${formatDuration(sourceStartedAt - startedAt)} remaining=${estimateRemaining(startedAt, completed, syncable.length)}`);
+    const result = await runGbrainStreaming(args, {
       cwd: os.homedir(),
-      timeoutMs: Math.max((opts.timeoutSec + 30) * 1000, 60_000),
       env: opts.trace ? { GBRAIN_SYNC_TRACE: '1' } : {},
     });
+    completed += 1;
     const record = {
       id,
       path: localPath,
-      timeoutSec: opts.timeoutSec,
-      gbrainTimeoutSec: opts.gbrainTimeoutSec,
       trace: opts.trace,
       args,
       exitCode: result.status,
+      elapsedMs: Date.now() - sourceStartedAt,
       stdout: redactString((result.stdout || '').trim()),
       stderr: redactString((result.stderr || '').trim()),
     };
     if (result.status !== 0) {
-      log(`sync failed ${id}: ${record.stderr || record.stdout}`, opts);
+      progressLog(opts, `failed ${index + 1}/${syncable.length}: ${id}; elapsed=${formatDuration(Date.now() - startedAt)} remaining=unknown; reason=${record.stderr || record.stdout || `exit ${result.status}`}`);
       record.status = 'error';
     } else {
+      progressLog(opts, `finished ${index + 1}/${syncable.length}: ${id}; source_time=${formatDuration(record.elapsedMs)} elapsed=${formatDuration(Date.now() - startedAt)} remaining=${estimateRemaining(startedAt, completed, syncable.length)}`);
       record.status = 'ok';
     }
     results.push(record);
@@ -897,7 +945,7 @@ function isDefaultBlockedWideRoot(key) {
   );
 }
 
-function main() {
+async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const roots = opts.roots || defaultRoots();
   validateRunRoots(roots);
@@ -930,7 +978,7 @@ function main() {
   }
 
   if (opts.sync) {
-    summary.sync = syncSources(sources, repos, opts);
+    summary.sync = await syncSources(sources, repos, opts);
   }
 
   if (opts.json) process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
@@ -940,12 +988,10 @@ function main() {
 }
 
 if (require.main === module) {
-  try {
-    main();
-  } catch (err) {
+  main().catch((err) => {
     process.stderr.write(`machine-memory setup failed: ${err.message}\n`);
     process.exit(1);
-  }
+  });
 } else {
 	  module.exports = {
 	    isGbrainServeProcess,

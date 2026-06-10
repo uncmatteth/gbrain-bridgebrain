@@ -73,8 +73,6 @@ $BaseUrl = "http://127.0.0.1:$Port/v1/t/$Token"
 $MachineMemoryIntervalSeconds = if ($env:GBRAIN_MACHINE_SYNC_INTERVAL_SECONDS) { $env:GBRAIN_MACHINE_SYNC_INTERVAL_SECONDS } else { "900" }
 $MachineMemoryRoots = if ($env:GBRAIN_MACHINE_ROOTS) { $env:GBRAIN_MACHINE_ROOTS } else { "" }
 $MachineMemoryTerminateServe = if ($env:GBRAIN_MACHINE_TERMINATE_SERVE) { $env:GBRAIN_MACHINE_TERMINATE_SERVE } else { "none" }
-$MachineMemorySyncTimeoutSeconds = if ($env:GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS) { $env:GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS } else { "600" }
-$MachineMemoryGbrainTimeoutSeconds = if ($env:GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS) { $env:GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS } else { "" }
 $GbrainInstallSpec = if ($env:GBRAIN_INSTALL_SPEC) { $env:GBRAIN_INSTALL_SPEC } else { "github:garrytan/gbrain#1eb430a2df9f842a754dd6af9910f049ccac65a1" }
 $MachineMemoryUnlock = if ($env:BRIDGEBRAIN_ENABLE_MACHINE_MEMORY) { $env:BRIDGEBRAIN_ENABLE_MACHINE_MEMORY } else { "" }
 $MachineMemoryAllowWideRoots = if ($env:BRIDGEBRAIN_ALLOW_WIDE_MACHINE_MEMORY_ROOTS) { $env:BRIDGEBRAIN_ALLOW_WIDE_MACHINE_MEMORY_ROOTS } else { "" }
@@ -172,13 +170,6 @@ function Test-MachineMemoryRequest {
     Fail "GBRAIN_MACHINE_TERMINATE_SERVE must be none or all."
   }
   Test-PositiveInteger "GBRAIN_MACHINE_SYNC_INTERVAL_SECONDS" $MachineMemoryIntervalSeconds
-  Test-PositiveInteger "GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS" $MachineMemorySyncTimeoutSeconds
-  if ($MachineMemoryGbrainTimeoutSeconds) {
-    Test-PositiveInteger "GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS" $MachineMemoryGbrainTimeoutSeconds
-    if ([int]$MachineMemoryGbrainTimeoutSeconds -ge [int]$MachineMemorySyncTimeoutSeconds) {
-      Fail "GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS must be lower than GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS."
-    }
-  }
   if (($env:OS -eq "Windows_NT" -or $IsWindows) -and $MachineMemoryTerminateServe -ne "none") {
     Fail "GBRAIN_MACHINE_TERMINATE_SERVE=all is not supported on Windows. Stop gbrain serve before scheduled sync or use none."
   }
@@ -295,7 +286,6 @@ function Write-DryRunPlan {
   if ($SkipVerify) { Write-Host "Run verify: no" } else { Write-Host "Run verify: yes" }
   if ($MachineMemory) { Write-Host "Machine memory: yes" } else { Write-Host "Machine memory: no" }
   if ($MachineMemoryRoots) { Write-Host "Machine memory roots: $MachineMemoryRoots" } else { Write-Host "Machine memory roots: <unset>" }
-  if ($MachineMemoryGbrainTimeoutSeconds) { Write-Host "Machine memory gbrain timeout: $MachineMemoryGbrainTimeoutSeconds" } else { Write-Host "Machine memory gbrain timeout: <timeout minus 30s>" }
   if ($MachineMemorySyncNow) { Write-Host "Machine memory sync now: yes" } else { Write-Host "Machine memory sync now: no" }
   Write-Host "No files will be written. No Scheduled Tasks will be created or started. No GBrain sources will be registered or synced."
 }
@@ -310,8 +300,6 @@ function Install-MachineMemory {
   $GbrainHomeParentLiteral = ConvertTo-PowerShellLiteral $GbrainHomeParent
   $MachineMemoryRootsLiteral = ConvertTo-PowerShellLiteral $MachineMemoryRoots
   $MachineMemoryTerminateServeLiteral = ConvertTo-PowerShellLiteral $MachineMemoryTerminateServe
-  $MachineMemorySyncTimeoutSecondsLiteral = ConvertTo-PowerShellLiteral $MachineMemorySyncTimeoutSeconds
-  $MachineMemoryGbrainTimeoutSecondsLiteral = ConvertTo-PowerShellLiteral $MachineMemoryGbrainTimeoutSeconds
   $NodeBinLiteral = ConvertTo-PowerShellLiteral $NodeBin
   $CodexHomeLiteral = ConvertTo-PowerShellLiteral $CodexHome
   $MachineMemoryScriptLiteral = ConvertTo-PowerShellLiteral (Join-Path $MachineMemoryHome "setup-machine-memory.js")
@@ -323,9 +311,7 @@ function Install-MachineMemory {
 `$env:GBRAIN_HOME = $GbrainHomeParentLiteral
 `$env:GBRAIN_MACHINE_ROOTS = $MachineMemoryRootsLiteral
 `$env:GBRAIN_MACHINE_TERMINATE_SERVE = $MachineMemoryTerminateServeLiteral
-`$env:GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS = $MachineMemorySyncTimeoutSecondsLiteral
-`$env:GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS = $MachineMemoryGbrainTimeoutSecondsLiteral
-& $NodeBinLiteral $MachineMemoryScriptLiteral sync-once
+& $NodeBinLiteral $MachineMemoryScriptLiteral sync
 exit `$LASTEXITCODE
 "@ | Set-Content -Encoding UTF8 $Runner
   Protect-LocalSecretPath $Runner
@@ -373,7 +359,7 @@ Copy-Item -Force (Join-Path $Root "bridge-skill\$SkillName\scripts\gpt-web-login
 
 $env:GPT_WEB_LOGIN_CODEX_BIN = $CodexBin
 $env:GPT_WEB_LOGIN_CWD = $HOME
-Invoke-Checked "bridge smoke" $NodeBin @((Join-Path $SkillDest "scripts\gpt-web-login-bridge.js"), "smoke")
+Invoke-Checked "bridge syntax" $NodeBin @("--check", (Join-Path $SkillDest "scripts\gpt-web-login-bridge.js"))
 Invoke-Checked "BridgeBrain GBrain patch" $NodeBin @((Join-Path $Root "scripts\patch-gbrain-litellm.js"))
 
 $GbrainConfigDir = Join-Path $GbrainHomeParent ".gbrain"

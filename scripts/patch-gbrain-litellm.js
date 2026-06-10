@@ -69,14 +69,6 @@ function walkForEmbeddingDimCheckFiles(root, files) {
   walkForGbrainFiles(root, files, 'src/core/embedding-dim-check.ts');
 }
 
-function walkForCliOptionsFiles(root, files) {
-  walkForGbrainFiles(root, files, 'src/core/cli-options.ts');
-}
-
-function walkForCliFiles(root, files) {
-  walkForGbrainFiles(root, files, 'src/cli.ts');
-}
-
 function activeGatewayFiles() {
   const files = new Set();
   const explicit = process.env.GBRAIN_GATEWAY_TS;
@@ -119,46 +111,6 @@ function activeEmbeddingDimCheckFiles() {
   return [...files].map(realpathMaybe).filter((file, index, all) => file && all.indexOf(file) === index && fs.existsSync(file));
 }
 
-function activeCliOptionsFiles() {
-  const files = new Set();
-  const explicit = process.env.GBRAIN_CLI_OPTIONS_TS;
-  if (explicit) files.add(explicit);
-
-  for (const gbrainPath of gbrainBinaryCandidates()) {
-    const resolved = realpathMaybe(gbrainPath);
-    const normalized = resolved.replace(/\\/g, '/');
-    if (normalized.endsWith('/src/cli.ts')) {
-      files.add(path.join(path.dirname(resolved), 'core', 'cli-options.ts'));
-    }
-    const nodeModuleGuess = normalized.replace(/\/bin\/gbrain(?:\.cmd)?$/, '/node_modules/gbrain/src/core/cli-options.ts');
-    if (nodeModuleGuess !== normalized) files.add(nodeModuleGuess);
-  }
-
-  const home = os.homedir();
-  files.add(path.join(home, '.bun', 'install', 'global', 'node_modules', 'gbrain', 'src', 'core', 'cli-options.ts'));
-
-  return [...files].map(realpathMaybe).filter((file, index, all) => file && all.indexOf(file) === index && fs.existsSync(file));
-}
-
-function activeCliFiles() {
-  const files = new Set();
-  const explicit = process.env.GBRAIN_CLI_TS;
-  if (explicit) files.add(explicit);
-
-  for (const gbrainPath of gbrainBinaryCandidates()) {
-    const resolved = realpathMaybe(gbrainPath);
-    const normalized = resolved.replace(/\\/g, '/');
-    if (normalized.endsWith('/src/cli.ts')) files.add(resolved);
-    const nodeModuleGuess = normalized.replace(/\/bin\/gbrain(?:\.cmd)?$/, '/node_modules/gbrain/src/cli.ts');
-    if (nodeModuleGuess !== normalized) files.add(nodeModuleGuess);
-  }
-
-  const home = os.homedir();
-  files.add(path.join(home, '.bun', 'install', 'global', 'node_modules', 'gbrain', 'src', 'cli.ts'));
-
-  return [...files].map(realpathMaybe).filter((file, index, all) => file && all.indexOf(file) === index && fs.existsSync(file));
-}
-
 function cacheGatewayFiles(activeFiles) {
   const files = new Set();
   const active = new Set(activeFiles.map(realpathMaybe));
@@ -175,28 +127,6 @@ function cacheEmbeddingDimCheckFiles(activeFiles) {
   const active = new Set(activeFiles.map(realpathMaybe));
   const home = os.homedir();
   walkForEmbeddingDimCheckFiles(path.join(home, '.bun', 'install', 'cache'), files);
-
-  return [...files]
-    .map(realpathMaybe)
-    .filter((file, index, all) => file && all.indexOf(file) === index && fs.existsSync(file) && !active.has(file));
-}
-
-function cacheCliOptionsFiles(activeFiles) {
-  const files = new Set();
-  const active = new Set(activeFiles.map(realpathMaybe));
-  const home = os.homedir();
-  walkForCliOptionsFiles(path.join(home, '.bun', 'install', 'cache'), files);
-
-  return [...files]
-    .map(realpathMaybe)
-    .filter((file, index, all) => file && all.indexOf(file) === index && fs.existsSync(file) && !active.has(file));
-}
-
-function cacheCliFiles(activeFiles) {
-  const files = new Set();
-  const active = new Set(activeFiles.map(realpathMaybe));
-  const home = os.homedir();
-  walkForCliFiles(path.join(home, '.bun', 'install', 'cache'), files);
 
   return [...files]
     .map(realpathMaybe)
@@ -307,108 +237,6 @@ function patchEmbeddingDimCheckFile(file, opts = {}) {
   return 'patched';
 }
 
-function patchCliOptionsFile(file, opts = {}) {
-  const original = fs.readFileSync(file, 'utf8');
-  if (original.includes("command === 'sync' && i > commandIndex")) {
-    return 'already_patched';
-  }
-
-  const beforeHeader = `  const cliOpts: CliOptions = { ...DEFAULT_CLI_OPTIONS };
-  const rest: string[] = [];
-
-  for (let i = 0; i < argv.length; i++) {`;
-  const afterHeader = `  const cliOpts: CliOptions = { ...DEFAULT_CLI_OPTIONS };
-  const rest: string[] = [];
-  const commandIndex = findCommandIndex(argv);
-  const command = commandIndex >= 0 ? argv[commandIndex] : null;
-
-  for (let i = 0; i < argv.length; i++) {`;
-
-  const beforeSpaceTimeout = `    if (a === '--timeout' && i + 1 < argv.length) {
-      const next = argv[i + 1];`;
-  const afterSpaceTimeout = `    if (a === '--timeout' && i + 1 < argv.length) {
-      if (command === 'sync' && i > commandIndex) {
-        rest.push(a, argv[i + 1]);
-        i++;
-        continue;
-      }
-      const next = argv[i + 1];`;
-
-  const beforeEqualsTimeout = `    if (a.startsWith('--timeout=')) {
-      const val = a.slice('--timeout='.length);`;
-  const afterEqualsTimeout = `    if (a.startsWith('--timeout=')) {
-      if (command === 'sync' && i > commandIndex) {
-        rest.push(a);
-        continue;
-      }
-      const val = a.slice('--timeout='.length);`;
-
-  const beforeFindCommand = `}
-
-/**
- * v0.31.1: parse a timeout value. Accepts:`;
-  const afterFindCommand = `}
-
-function findCommandIndex(argv: string[]): number {
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--quiet' || a === '--progress-json' || a === '--explain') continue;
-    if ((a === '--progress-interval' || a === '--timeout') && i + 1 < argv.length) {
-      i++;
-      continue;
-    }
-    if (a.startsWith('--progress-interval=') || a.startsWith('--timeout=')) continue;
-    return i;
-  }
-  return -1;
-}
-
-/**
- * v0.31.1: parse a timeout value. Accepts:`;
-
-  if (
-    !original.includes(beforeHeader) ||
-    !original.includes(beforeSpaceTimeout) ||
-    !original.includes(beforeEqualsTimeout) ||
-    !original.includes(beforeFindCommand)
-  ) {
-    return 'pattern_not_found';
-  }
-
-  if (opts.checkOnly) return 'patchable';
-  backupFile(file);
-  writeFileAtomic(
-    file,
-    original
-      .replace(beforeHeader, afterHeader)
-      .replace(beforeSpaceTimeout, afterSpaceTimeout)
-      .replace(beforeEqualsTimeout, afterEqualsTimeout)
-      .replace(beforeFindCommand, afterFindCommand),
-  );
-  return 'patched';
-}
-
-function patchCliFile(file, opts = {}) {
-  const original = fs.readFileSync(file, 'utf8');
-  if (original.includes('readOnlyDefaultTimeoutMs === null')) {
-    return 'already_patched';
-  }
-
-  const before = `  const readOnlyTimeoutMs = userTimeoutMs ?? readOnlyDefaultTimeoutMs;`;
-  const after = `  const readOnlyTimeoutMs = readOnlyDefaultTimeoutMs === null
-    ? null
-    : (userTimeoutMs ?? readOnlyDefaultTimeoutMs);`;
-
-  if (!original.includes(before)) {
-    return 'pattern_not_found';
-  }
-
-  if (opts.checkOnly) return 'patchable';
-  backupFile(file);
-  writeFileAtomic(file, original.replace(before, after));
-  return 'patched';
-}
-
 function patchCacheFile(file, patcher) {
   try {
     return patcher(file);
@@ -446,21 +274,8 @@ if (activeDimFiles.length === 0) {
   console.error('Could not find installed gbrain embedding-dim-check.ts. Set GBRAIN_EMBEDDING_DIM_CHECK_TS if your install layout changed.');
   process.exit(1);
 }
-const activeCliOptions = activeCliOptionsFiles();
-if (activeCliOptions.length === 0) {
-  console.error('Could not find installed gbrain cli-options.ts. Set GBRAIN_CLI_OPTIONS_TS if your install layout changed.');
-  process.exit(1);
-}
-const activeCli = activeCliFiles();
-if (activeCli.length === 0) {
-  console.error('Could not find installed gbrain cli.ts. Set GBRAIN_CLI_TS if your install layout changed.');
-  process.exit(1);
-}
-
 preflightActivePatchSet('gateway.ts', activeFiles, patchGatewayFile);
 preflightActivePatchSet('embedding-dim-check.ts', activeDimFiles, patchEmbeddingDimCheckFile);
-preflightActivePatchSet('cli-options.ts', activeCliOptions, patchCliOptionsFile);
-preflightActivePatchSet('cli.ts', activeCli, patchCliFile);
 
 let patched = 0;
 let ok = 0;
@@ -534,79 +349,4 @@ for (const file of cacheEmbeddingDimCheckFiles(activeDimFiles)) {
 console.log(
   `BridgeBrain GBrain dimension patch ready (${dimPatched} active patched, ${dimOk - dimPatched} active already patched, ` +
     `${cacheDimPatched} cache patched, ${cacheDimOk - cacheDimPatched} cache already patched, ${cacheDimSkipped} cache skipped).`,
-);
-
-let cliOptionsPatched = 0;
-let cliOptionsOk = 0;
-let cliOptionsFailed = 0;
-for (const file of activeCliOptions) {
-  const status = patchCliOptionsFile(file);
-  console.log(`cli_options_${status}: ${file}`);
-  if (status === 'patched') cliOptionsPatched += 1;
-  if (status === 'patched' || status === 'already_patched') cliOptionsOk += 1;
-  if (status === 'pattern_not_found') cliOptionsFailed += 1;
-}
-
-if (cliOptionsOk === 0) {
-  console.error('No gbrain cli-options.ts files were patched. Upstream GBrain may have changed; stop and inspect before continuing.');
-  process.exit(1);
-}
-
-if (cliOptionsFailed > 0) {
-  console.error('The active gbrain cli-options.ts did not match the expected patch pattern. Review the active install before continuing.');
-  process.exit(1);
-}
-
-let cacheCliOptionsPatched = 0;
-let cacheCliOptionsOk = 0;
-let cacheCliOptionsSkipped = 0;
-for (const file of cacheCliOptionsFiles(activeCliOptions)) {
-  const status = patchCacheFile(file, patchCliOptionsFile);
-  console.log(`cache_cli_options_${status}: ${file}`);
-  if (status === 'patched') cacheCliOptionsPatched += 1;
-  if (status === 'patched' || status === 'already_patched') cacheCliOptionsOk += 1;
-  if (status === 'pattern_not_found') cacheCliOptionsSkipped += 1;
-}
-
-console.log(
-  `BridgeBrain GBrain sync-timeout cli-options patch ready (${cliOptionsPatched} active patched, ` +
-    `${cliOptionsOk - cliOptionsPatched} active already patched, ${cacheCliOptionsPatched} cache patched, ` +
-    `${cacheCliOptionsOk - cacheCliOptionsPatched} cache already patched, ${cacheCliOptionsSkipped} cache skipped).`,
-);
-
-let cliPatched = 0;
-let cliOk = 0;
-let cliFailed = 0;
-for (const file of activeCli) {
-  const status = patchCliFile(file);
-  console.log(`cli_${status}: ${file}`);
-  if (status === 'patched') cliPatched += 1;
-  if (status === 'patched' || status === 'already_patched') cliOk += 1;
-  if (status === 'pattern_not_found') cliFailed += 1;
-}
-
-if (cliOk === 0) {
-  console.error('No gbrain cli.ts files were patched. Upstream GBrain may have changed; stop and inspect before continuing.');
-  process.exit(1);
-}
-
-if (cliFailed > 0) {
-  console.error('The active gbrain cli.ts did not match the expected patch pattern. Review the active install before continuing.');
-  process.exit(1);
-}
-
-let cacheCliPatched = 0;
-let cacheCliOk = 0;
-let cacheCliSkipped = 0;
-for (const file of cacheCliFiles(activeCli)) {
-  const status = patchCacheFile(file, patchCliFile);
-  console.log(`cache_cli_${status}: ${file}`);
-  if (status === 'patched') cacheCliPatched += 1;
-  if (status === 'patched' || status === 'already_patched') cacheCliOk += 1;
-  if (status === 'pattern_not_found') cacheCliSkipped += 1;
-}
-
-console.log(
-  `BridgeBrain GBrain sync-timeout cli patch ready (${cliPatched} active patched, ${cliOk - cliPatched} active already patched, ` +
-    `${cacheCliPatched} cache patched, ${cacheCliOk - cacheCliPatched} cache already patched, ${cacheCliSkipped} cache skipped).`,
 );

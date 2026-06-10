@@ -143,9 +143,6 @@ if ($Profile -ne "mock" -and $SkipBridge) {
 if ($Profile -ne "mock" -and -not $SkipBridge) {
   if (-not $CodexBin) { Fail "codex is missing" }
   if (-not (Test-Path $BridgeScript)) { Fail "bridge script missing at $BridgeScript" }
-  Write-Host "Checking ChatGPT web-login bridge smoke..."
-  $env:GPT_WEB_LOGIN_CODEX_BIN = $CodexBin
-  Invoke-Checked "bridge smoke" $NodeBin @($BridgeScript, "smoke")
 }
 
 Write-Host "Checking local embedding service..."

@@ -173,61 +173,6 @@ exit 0
 	  const staleCacheDimCheck = path.join(temp, 'home', '.bun', 'install', 'cache', '@GH@garrytan-gbrain-stale@@@1', 'src', 'core', 'embedding-dim-check.ts');
 	  fs.mkdirSync(path.dirname(staleCacheDimCheck), { recursive: true });
 	  fs.writeFileSync(staleCacheDimCheck, 'export const stale = true;\n');
-	  const cliOptions = path.join(temp, 'cli-options.ts');
-	  fs.writeFileSync(
-	    cliOptions,
-	    [
-	      'export function parseGlobalFlags(argv: string[]): { cliOpts: any; rest: string[] } {',
-	      '  const cliOpts: CliOptions = { ...DEFAULT_CLI_OPTIONS };',
-	      '  const rest: string[] = [];',
-	      '',
-	      '  for (let i = 0; i < argv.length; i++) {',
-	      '    const a = argv[i];',
-	      "    if (a === '--timeout' && i + 1 < argv.length) {",
-	      '      const next = argv[i + 1];',
-	      '      const parsed = parseTimeout(next);',
-	      '      if (parsed !== null) {',
-	      '        cliOpts.timeoutMs = parsed;',
-	      '        i++;',
-	      '        continue;',
-	      '      }',
-	      '      rest.push(a);',
-	      '      continue;',
-	      '    }',
-	      "    if (a.startsWith('--timeout=')) {",
-	      "      const val = a.slice('--timeout='.length);",
-	      '      const parsed = parseTimeout(val);',
-	      '      if (parsed !== null) {',
-	      '        cliOpts.timeoutMs = parsed;',
-	      '        continue;',
-	      '      }',
-	      '      rest.push(a);',
-	      '      continue;',
-	      '    }',
-	      '    rest.push(a);',
-	      '  }',
-	      '',
-	      '  return { cliOpts, rest };',
-	      '}',
-	      '',
-	      '/**',
-	      ' * v0.31.1: parse a timeout value. Accepts:',
-	      ' */',
-	      'function parseTimeout(s: string): number | null { return null; }',
-	      '',
-	    ].join('\n'),
-	  );
-	  const cliTs = path.join(temp, 'cli.ts');
-	  fs.writeFileSync(
-	    cliTs,
-	    [
-	      'async function main() {',
-	      '  const readOnlyTimeoutMs = userTimeoutMs ?? readOnlyDefaultTimeoutMs;',
-	      '}',
-	      '',
-	    ].join('\n'),
-	  );
-
 	  const env = {
 	    ...process.env,
     HOME: home,
@@ -237,8 +182,6 @@ exit 0
 	    GBRAIN_BIN: path.join(bin, 'fake-gbrain'),
 	    GBRAIN_GATEWAY_TS: gateway,
 	    GBRAIN_EMBEDDING_DIM_CHECK_TS: dimCheck,
-	    GBRAIN_CLI_OPTIONS_TS: cliOptions,
-	    GBRAIN_CLI_TS: cliTs,
 	    NODE_BIN: process.execPath,
     GBRAIN_CHATGPT_EMBED_PORT: '59998',
     BRIDGEBRAIN_API_TOKEN: 'ismoketest',
@@ -408,14 +351,14 @@ exit 0
   if (!machineSystemd.includes('CODEX_HOME=@CODEX_HOME@')) {
     fail('systemd machine-memory template missing CODEX_HOME environment');
   }
-  if (!machineSystemd.includes('GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS=@GBRAIN_TIMEOUT_SECONDS@')) {
-    fail('systemd machine-memory template missing GBrain graceful timeout environment');
-  }
   if (!machineSystemd.includes('TimeoutStartSec=infinity')) {
-    fail('systemd machine-memory service must let the runner own sync timeouts');
+    fail('systemd machine-memory service must not let systemd kill long official sync runs');
   }
-  if (!machineSystemd.includes('ExecStart="@NODE_BIN@" "@MACHINE_MEMORY_SCRIPT@" sync-once')) {
+  if (!machineSystemd.includes('ExecStart="@NODE_BIN@" "@MACHINE_MEMORY_SCRIPT@" sync')) {
     fail('systemd machine-memory ExecStart must quote rendered paths');
+  }
+  if (machineSystemd.includes('GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS') || machineSystemd.includes('GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS')) {
+    fail('systemd machine-memory template must not render wrapper sync timeout envs');
   }
   if (machineSystemdTimer.includes('OnBootSec=')) {
     fail('systemd machine-memory timer must not fire immediately from an elapsed boot timer');
@@ -432,8 +375,8 @@ exit 0
   if (!machineLaunchd.includes('<key>CODEX_HOME</key>')) {
     fail('launchd machine-memory template missing CODEX_HOME environment');
   }
-  if (!machineLaunchd.includes('<key>GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS</key>')) {
-    fail('launchd machine-memory template missing GBrain graceful timeout environment');
+  if (machineLaunchd.includes('<key>GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS</key>') || machineLaunchd.includes('<key>GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS</key>')) {
+    fail('launchd machine-memory template must not render wrapper sync timeout envs');
   }
   if (machineLaunchd.includes('<key>RunAtLoad</key>\n  <true/>')) {
     fail('launchd machine-memory must not run at load by default');
@@ -593,7 +536,9 @@ exit 0
   if (!installPs1.includes('$env:GBRAIN_HOME = $GbrainHomeParentLiteral')) fail('install.ps1 machine-memory scheduled runner missing literal GBRAIN_HOME env');
   if (!installPs1.includes('$env:CODEX_HOME = $CodexHomeLiteral')) fail('install.ps1 machine-memory scheduled runner missing literal CODEX_HOME env');
   if (!installPs1.includes('$env:GBRAIN_MACHINE_ROOTS = $MachineMemoryRootsLiteral')) fail('install.ps1 machine-memory scheduled runner missing literal roots env');
-  if (!installPs1.includes('$env:GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS = $MachineMemoryGbrainTimeoutSecondsLiteral')) fail('install.ps1 machine-memory scheduled runner missing gbrain timeout env');
+  if (installPs1.includes('GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS') || installPs1.includes('GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS')) {
+    fail('install.ps1 machine-memory scheduled runner must not set wrapper sync timeout envs');
+  }
   if (!installPs1.includes('else { "none" }')) fail('install.ps1 machine-memory terminate default must be none');
   if (!installPs1.includes('GBRAIN_MACHINE_TERMINATE_SERVE=all is not supported on Windows')) {
     fail('install.ps1 must reject unsupported Windows terminate-serve mode');
@@ -685,8 +630,14 @@ exit 0
   if (!machineMemoryJs.includes("gbrain(['status', '--json', '--section', 'sync']")) {
     fail('machine-memory runner must confirm sync-enabled source status before sync');
   }
-  if (!machineMemoryJs.includes("'--timeout', String(opts.gbrainTimeoutSec)")) {
-    fail('machine-memory runner must pass gbrain sync its own graceful --timeout');
+  if (machineMemoryJs.includes("'--timeout'") || machineMemoryJs.includes('gbrainTimeoutSec') || machineMemoryJs.includes('timeoutSec')) {
+    fail('machine-memory runner must not pass wrapper timeout flags to gbrain sync');
+  }
+  if (!machineMemoryJs.includes('runGbrainStreaming(args')) {
+    fail('machine-memory runner must stream official gbrain sync output to the terminal');
+  }
+  if (!machineMemoryJs.includes('estimateRemaining(startedAt')) {
+    fail('machine-memory runner must print estimated remaining time');
   }
   if (!machineMemoryJs.includes("GBRAIN_SYNC_TRACE: '1'")) {
     fail('machine-memory runner must enable GBrain sync trace by default');
@@ -723,7 +674,9 @@ exit 0
   if (!installSh.includes('if resolved="$(cd "$value"')) fail('install.sh must separate path resolution fallback from command output');
   if (!installSh.includes('systemd unit values must not contain newlines')) fail('install.sh must reject unsafe systemd substitutions');
   if (!installSh.includes('CODEX_HOME_SYSTEMD_ESC')) fail('install.sh must systemd-escape machine-memory env values');
-  if (!installSh.includes('GBRAIN_TIMEOUT_SECONDS@|$MACHINE_MEMORY_GBRAIN_TIMEOUT_SECONDS_SYSTEMD_ESC')) fail('install.sh must render machine-memory GBrain timeout env');
+  if (installSh.includes('GBRAIN_TIMEOUT_SECONDS') || installSh.includes('MACHINE_MEMORY_GBRAIN_TIMEOUT_SECONDS')) {
+    fail('install.sh must not render machine-memory GBrain timeout env');
+  }
   if (!installSh.includes('launchctl start com.gbrain.bridgebrain.machine-sync') || installSh.includes('launchctl start com.gbrain.bridgebrain.machine-sync || true')) {
     fail('install.sh machine-memory sync-now must not silently ignore launchctl start failure');
   }
@@ -770,7 +723,9 @@ exit 0
     fail('install.ps1 must define Fail exactly once before early validation');
   }
   if (!verifyPs1.includes('Join-Path $GbrainConfigDir "config.json"')) fail('verify.ps1 must use GBRAIN_HOME/.gbrain config path');
-  if (!verifyPs1.includes('$env:GPT_WEB_LOGIN_CODEX_BIN = $CodexBin')) fail('verify.ps1 does not honor CODEX_BIN for bridge smoke');
+  if (verifyPs1.includes('Invoke-Checked "bridge smoke"') || verifySh.includes('bridge smoke')) {
+    fail('verify scripts must not run bridge smoke');
+  }
   if (!verifyPs1.includes('BRIDGEBRAIN_VERIFY_ALLOW_REMOTE')) fail('verify.ps1 must reject non-loopback provider URLs by default');
 	  if (!verifyPs1.includes('remote provider URLs must use https when credentials would be sent')) {
 	    fail('verify.ps1 must reject remote HTTP credential-bearing provider URLs');
@@ -836,14 +791,6 @@ exit 0
 	  const patchedDimCheck = fs.readFileSync(dimCheck, 'utf8');
 	  if (!patchedDimCheck.includes('BridgeBrain proxy recipes declare their own vector width')) {
 	    fail('dim-check patch smoke did not patch fake embedding-dim-check.ts');
-	  }
-	  const patchedCliOptions = fs.readFileSync(cliOptions, 'utf8');
-	  if (!patchedCliOptions.includes('const commandIndex = findCommandIndex(argv)') || !patchedCliOptions.includes("command === 'sync' && i > commandIndex")) {
-	    fail('cli-options patch smoke did not preserve sync --timeout for gbrain');
-	  }
-	  const patchedCli = fs.readFileSync(cliTs, 'utf8');
-	  if (!patchedCli.includes('readOnlyDefaultTimeoutMs === null')) {
-	    fail('cli.ts patch smoke did not prevent non-read-only timeout dispatch');
 	  }
 	  if (!fs.existsSync(path.join(codexHome, 'services', 'gbrain-chatgpt-embeddings', 'server.js'))) {
 	    fail('installer did not copy service server.js into CODEX_HOME');
@@ -1316,7 +1263,7 @@ exit 0
   fs.mkdirSync(path.join(freshSyncRepo, '.git'), { recursive: true });
   const firstRunDryRun = spawnSync(process.execPath, [
     'scripts/setup-machine-memory.js',
-    'sync-once',
+    'sync',
     '--roots',
     freshSyncRoot,
     '--dry-run',
@@ -1343,7 +1290,7 @@ exit 0
 	  fs.writeFileSync(path.join(malformedDryRunGbrainHome, '.gbrain', 'config.json'), '{"api_key": raw-private-token\n');
 	  const malformedConfigDryRun = spawnSync(process.execPath, [
 	    'scripts/setup-machine-memory.js',
-	    'sync-once',
+	    'sync',
 	    '--roots',
 	    freshSyncRoot,
 	    '--dry-run',
@@ -1394,7 +1341,7 @@ exit 0
   );
   const syncDryRun = spawnSync(process.execPath, [
     'scripts/setup-machine-memory.js',
-    'sync-once',
+    'sync',
     '--roots',
     repoRoot,
     '--dry-run',
@@ -1480,15 +1427,10 @@ exit 0
   const syncLog = path.join(temp, 'fake-sync-args.log');
   const syncRun = spawnSync(process.execPath, [
     'scripts/setup-machine-memory.js',
-    'sync-once',
+    'sync',
     '--roots',
     repoRoot,
     '--no-register',
-    '--timeout-sec',
-    '120',
-    '--gbrain-timeout-sec',
-    '90',
-    '--no-embed',
     '--no-extract',
     '--no-schema-pack',
     '--json',
@@ -1520,12 +1462,15 @@ exit 0
   }
   const syncRunJson = JSON.parse(syncRun.stdout);
   const syncRunRecord = syncRunJson.sync.find((item) => item.id === 'mm-current-11111111');
-  if (!syncRunRecord || syncRunRecord.status !== 'ok' || syncRunRecord.gbrainTimeoutSec !== 90 || syncRunRecord.timeoutSec !== 120) {
-    fail(`machine-memory sync summary missed timeout proof: ${syncRun.stdout}`);
+  if (!syncRunRecord || syncRunRecord.status !== 'ok' || !Number.isFinite(syncRunRecord.elapsedMs)) {
+    fail(`machine-memory sync summary missed elapsed proof: ${syncRun.stdout}`);
   }
   const syncArgs = fs.readFileSync(syncLog, 'utf8');
-  if (!syncArgs.includes('--timeout 90') || !syncArgs.includes('--no-embed') || !syncArgs.includes('--no-extract') || !syncArgs.includes('--no-schema-pack')) {
-    fail(`machine-memory sync did not pass safe GBrain flags: ${syncArgs}`);
+  if (syncArgs.includes('--timeout') || syncArgs.includes('--no-embed')) {
+    fail(`machine-memory sync passed removed timeout/no-embed flags: ${syncArgs}`);
+  }
+  if (!syncArgs.includes('sync --source mm-current-11111111 --yes --no-pull --no-extract --no-schema-pack')) {
+    fail(`machine-memory sync did not pass official GBrain flags: ${syncArgs}`);
   }
   const syncTrace = fs.readFileSync(`${syncLog}.trace`, 'utf8').trim();
   if (syncTrace !== '1') {
