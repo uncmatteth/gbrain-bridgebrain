@@ -48,15 +48,25 @@ Options:
   --no-pull               Pass --no-pull to gbrain sync. Default on.
   --pull                  Allow gbrain sync to git pull.
   --no-embed              Pass --no-embed to gbrain sync.
+  --no-extract            Pass --no-extract to gbrain sync.
+  --no-schema-pack        Pass --no-schema-pack to gbrain sync.
+  --import-only           Sync import phase only; implies --no-embed,
+                           --no-extract, and --no-schema-pack.
+  --trace / --no-trace    Set GBRAIN_SYNC_TRACE=1 for file-level progress.
+                           Default on; set GBRAIN_MACHINE_SYNC_TRACE=0 to disable.
   --terminate-serve <m>    Before sync: none or all. Default:
                            GBRAIN_MACHINE_TERMINATE_SERVE or none.
-  --timeout-sec <n>        Per-source process timeout. Default: env or 600.
+  --timeout-sec <n>        Per-source wrapper watchdog. Default: env or 600.
+  --gbrain-timeout-sec <n> Per-source gbrain graceful timeout. Default:
+                           timeout-sec minus 30.
   --json                  Emit a final JSON summary.
   --dry-run               Print actions without mutating GBrain.
 
 Environment:
   GBRAIN_BIN              gbrain executable path.
   GBRAIN_MACHINE_ROOTS    ${path.delimiter}-separated root list.
+  GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS  Graceful gbrain timeout seconds.
+  GBRAIN_MACHINE_SYNC_TRACE              0 disables GBRAIN_SYNC_TRACE.
 `);
 }
 
@@ -69,10 +79,16 @@ function parseArgs(argv) {
     sync: true,
     noPull: true,
     noEmbed: false,
+    noExtract: false,
+    noSchemaPack: false,
+    trace: process.env.GBRAIN_MACHINE_SYNC_TRACE !== '0',
     terminateServe: process.env.GBRAIN_MACHINE_TERMINATE_SERVE || 'none',
     timeoutSec: process.env.GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS
       ? positiveInt(process.env.GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS, 'GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS')
       : 600,
+    gbrainTimeoutSec: process.env.GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS
+      ? positiveInt(process.env.GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS, 'GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS')
+      : null,
     json: false,
     dryRun: false,
   };
@@ -113,11 +129,31 @@ function parseArgs(argv) {
       case '--no-embed':
         opts.noEmbed = true;
         break;
+      case '--no-extract':
+        opts.noExtract = true;
+        break;
+      case '--no-schema-pack':
+        opts.noSchemaPack = true;
+        break;
+      case '--import-only':
+        opts.noEmbed = true;
+        opts.noExtract = true;
+        opts.noSchemaPack = true;
+        break;
+      case '--trace':
+        opts.trace = true;
+        break;
+      case '--no-trace':
+        opts.trace = false;
+        break;
       case '--terminate-serve':
         opts.terminateServe = args[++i] || '';
         break;
       case '--timeout-sec':
         opts.timeoutSec = positiveInt(args[++i], '--timeout-sec');
+        break;
+      case '--gbrain-timeout-sec':
+        opts.gbrainTimeoutSec = positiveInt(args[++i], '--gbrain-timeout-sec');
         break;
       case '--json':
         opts.json = true;
@@ -139,6 +175,7 @@ function parseArgs(argv) {
   if (process.platform === 'win32' && opts.terminateServe !== 'none') {
     throw new Error('--terminate-serve=all is not supported on Windows; stop gbrain serve before scheduled sync or use none');
   }
+  opts.gbrainTimeoutSec = resolveGbrainTimeoutSec(opts);
   return opts;
 }
 
@@ -146,6 +183,14 @@ function positiveInt(raw, name) {
   const n = Number(raw);
   if (!Number.isInteger(n) || n <= 0) throw new Error(`${name} must be a positive integer`);
   return n;
+}
+
+function resolveGbrainTimeoutSec(opts) {
+  const graceful = opts.gbrainTimeoutSec || Math.max(1, opts.timeoutSec - 30);
+  if (graceful >= opts.timeoutSec) {
+    throw new Error('--gbrain-timeout-sec must be lower than --timeout-sec so gbrain can exit before the wrapper watchdog kills it');
+  }
+  return graceful;
 }
 
 function splitPathList(value) {
@@ -729,24 +774,46 @@ function syncSources(sources, repoPaths, opts) {
   for (const source of syncable) {
     const id = sourceId(source);
     const localPath = sourceLocalPath(source);
-    const args = ['sync', '--source', id, '--strategy', 'auto', '--yes', '--json'];
+    const args = [
+      'sync',
+      '--source', id,
+      '--strategy', 'auto',
+      '--timeout', String(opts.gbrainTimeoutSec),
+      '--yes',
+      '--json',
+    ];
     if (opts.noPull) args.push('--no-pull');
     if (opts.noEmbed) args.push('--no-embed');
+    if (opts.noExtract) args.push('--no-extract');
+    if (opts.noSchemaPack) args.push('--no-schema-pack');
 
     if (opts.dryRun) {
       log(`[dry-run] gbrain ${args.join(' ')}`, opts);
-      results.push({ id, path: localPath, status: 'dry_run' });
+      results.push({
+        id,
+        path: localPath,
+        status: 'dry_run',
+        timeoutSec: opts.timeoutSec,
+        gbrainTimeoutSec: opts.gbrainTimeoutSec,
+        trace: opts.trace,
+        args,
+      });
       continue;
     }
 
-    log(`sync ${id} (${localPath})`, opts);
+    log(`sync ${id} (${localPath}) timeout=${opts.gbrainTimeoutSec}s watchdog=${opts.timeoutSec}s`, opts);
     const result = gbrain(args, {
       cwd: os.homedir(),
       timeoutMs: Math.max((opts.timeoutSec + 30) * 1000, 60_000),
+      env: opts.trace ? { GBRAIN_SYNC_TRACE: '1' } : {},
     });
     const record = {
       id,
       path: localPath,
+      timeoutSec: opts.timeoutSec,
+      gbrainTimeoutSec: opts.gbrainTimeoutSec,
+      trace: opts.trace,
+      args,
       exitCode: result.status,
       stdout: redactString((result.stdout || '').trim()),
       stderr: redactString((result.stderr || '').trim()),
