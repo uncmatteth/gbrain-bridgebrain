@@ -373,7 +373,7 @@ Copy-Item -Force (Join-Path $Root "bridge-skill\$SkillName\scripts\gpt-web-login
 
 $env:GPT_WEB_LOGIN_CODEX_BIN = $CodexBin
 $env:GPT_WEB_LOGIN_CWD = $HOME
-Invoke-Checked "bridge status" $NodeBin @((Join-Path $SkillDest "scripts\gpt-web-login-bridge.js"), "status")
+Invoke-Checked "bridge smoke" $NodeBin @((Join-Path $SkillDest "scripts\gpt-web-login-bridge.js"), "smoke")
 Invoke-Checked "BridgeBrain GBrain patch" $NodeBin @((Join-Path $Root "scripts\patch-gbrain-litellm.js"))
 
 $GbrainConfigDir = Join-Path $GbrainHomeParent ".gbrain"

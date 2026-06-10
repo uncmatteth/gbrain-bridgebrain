@@ -38,6 +38,9 @@ fs.writeFileSync(process.env.ARGV_FILE, JSON.stringify({
 fs.appendFileSync(process.env.CALLS_FILE, (args[0] || '') + '\\n');
 
 if (args[0] === 'doctor') {
+  if (process.env.FAKE_CODEX_DOCTOR_SLEEP_MS) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, Number(process.env.FAKE_CODEX_DOCTOR_SLEEP_MS));
+  }
   if (process.env.FAKE_CODEX_DOCTOR_NO_JSON === '1') {
     console.error('doctor failed before JSON');
     process.exit(9);
@@ -167,8 +170,8 @@ process.exit(2);
     encoding: 'utf8',
     timeout: 30_000,
   });
-  if (badAuth.status === 0) fail('bridge ask must fail when ChatGPT auth is unavailable');
-  if (fs.readFileSync(callsFile, 'utf8').includes('exec')) fail('auth failure still called codex exec');
+  if (badAuth.status !== 0) fail('bridge ask must use codex exec as the auth proof when doctor auth is stale');
+  if (!fs.readFileSync(callsFile, 'utf8').includes('exec')) fail('doctor auth mismatch prevented codex exec smoke');
 
   fs.writeFileSync(callsFile, '');
   const nonzeroDoctorAuthOk = spawnSync(process.execPath, [bridgeScript, 'ask'], {
@@ -195,8 +198,23 @@ process.exit(2);
     encoding: 'utf8',
     timeout: 30_000,
   });
-  if (failedDoctor.status === 0) fail('bridge ask must fail when codex doctor exits nonzero without JSON');
-  if (fs.readFileSync(callsFile, 'utf8').includes('exec')) fail('failed codex doctor still called codex exec');
+  if (failedDoctor.status !== 0) fail('bridge ask must not depend on codex doctor JSON');
+  if (!fs.readFileSync(callsFile, 'utf8').includes('exec')) fail('failed codex doctor prevented codex exec smoke');
+
+  fs.writeFileSync(callsFile, '');
+  const hangingDoctor = spawnSync(process.execPath, [bridgeScript, 'status'], {
+    env: {
+      ...env,
+      FAKE_CODEX_DOCTOR_SLEEP_MS: '2000',
+      GPT_WEB_LOGIN_STATUS_TIMEOUT_MS: '100',
+    },
+    encoding: 'utf8',
+    timeout: 30_000,
+  });
+  if (hangingDoctor.status === 0) fail('bridge status must fail when codex doctor times out');
+  if (!`${hangingDoctor.stdout}${hangingDoctor.stderr}`.includes('local provider status could not be confirmed')) {
+    fail('bridge status timeout did not report status confirmation failure');
+  }
 
   fs.writeFileSync(callsFile, '');
   const failEcho = spawnSync(process.execPath, [bridgeScript, 'ask'], {

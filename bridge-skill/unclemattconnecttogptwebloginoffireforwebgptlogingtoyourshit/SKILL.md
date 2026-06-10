@@ -51,8 +51,8 @@ The bridge passes prompt text through stdin, not command-line arguments. For chi
 Use the bundled bridge script:
 
 ```bash
-node scripts/gpt-web-login-bridge.js status
 node scripts/gpt-web-login-bridge.js smoke
+node scripts/gpt-web-login-bridge.js status
 printf '%s\n' "Return exactly OK." | node scripts/gpt-web-login-bridge.js ask
 ```
 
@@ -62,14 +62,14 @@ Before running `ask` or `smoke`, confirm the prompt is safe to send to the authe
 
 ## Workflow
 
-1. Run `node scripts/gpt-web-login-bridge.js status`.
-2. If status shows ChatGPT/Codex login available, use `ask` only for prompt text the user is comfortable sending to the authenticated provider.
-3. If status shows no login, report that the local CLI is not authenticated. Do not ask for secrets. Do not invent a fake API key. Do not do weird credential bullshit.
+1. Run `node scripts/gpt-web-login-bridge.js smoke` to prove the local Codex exec path can answer.
+2. Use `ask` only for prompt text the user is comfortable sending to the authenticated provider.
+3. Use `status` only as a diagnostic hint. If `status` cannot confirm login but `smoke` works, the bridge is usable.
 4. For portable packages, keep all paths relative to the skill folder and use environment variables for overrides.
 
 ## Commands
 
-- `status`: report only whether the local provider is available. It must not print auth mode, token presence, API-key presence, raw paths, or secrets.
+- `status`: diagnostic auth check. It must not print auth mode, token presence, API-key presence, raw paths, or secrets.
 - `smoke`: send a fixed harmless prompt through the authenticated local provider to prove the bridge can get a model response.
 - `ask`: read prompt text only from stdin, reject command-line prompt arguments, then send it through the authenticated local provider. This transmits prompt content to that provider account.
 
@@ -103,8 +103,8 @@ Do not add environment variables that contain secrets.
 
 - Install the skill.
 - Make sure local Codex is logged in through ChatGPT.
-- Run `node scripts/gpt-web-login-bridge.js status`.
 - Run `node scripts/gpt-web-login-bridge.js smoke`.
+- Run `node scripts/gpt-web-login-bridge.js status` only when diagnosing login state.
 - Use `ask` from this skill or copy the bridge pattern into another skill only for prompt text safe to send to the provider.
 - If somebody wants raw tokens in the package, tell them no, because that is how people get wrecked.
 

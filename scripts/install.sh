@@ -511,7 +511,7 @@ install -m 0644 "$ROOT/bridge-skill/$SKILL_NAME/agents/openai.yaml" "$SKILL_DEST
 install -m 0755 "$ROOT/bridge-skill/$SKILL_NAME/scripts/gpt-web-login-bridge.js" "$SKILL_DEST/scripts/gpt-web-login-bridge.js"
 
 GPT_WEB_LOGIN_CODEX_BIN="$CODEX_BIN" GPT_WEB_LOGIN_CWD="$HOME" \
-  "$NODE_BIN" "$SKILL_DEST/scripts/gpt-web-login-bridge.js" status
+  "$NODE_BIN" "$SKILL_DEST/scripts/gpt-web-login-bridge.js" smoke
 "$NODE_BIN" "$ROOT/scripts/patch-gbrain-litellm.js"
 
 mkdir -p "$GBRAIN_CONFIG_DIR"

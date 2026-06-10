@@ -1,14 +1,15 @@
 # Troubleshooting
 
-## Bridge Status Fails
+## Bridge Smoke Fails
 
 Run:
 
 ```bash
-node <codex-home>/skills/unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit/scripts/gpt-web-login-bridge.js status
+node <codex-home>/skills/unclemattconnecttogptwebloginoffireforwebgptlogingtoyourshit/scripts/gpt-web-login-bridge.js smoke
 ```
 
-If unavailable, log in to Codex with ChatGPT on that machine. Do not paste credentials into BridgeBrain. Do not invent an API key path.
+If smoke fails, log in to Codex with ChatGPT on that machine. Do not paste credentials into BridgeBrain. Do not invent an API key path.
+Use `status` only as a diagnostic hint; smoke is the real provider-readiness proof.
 
 ## Service Is Not Running
 

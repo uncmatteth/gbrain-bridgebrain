@@ -8,6 +8,7 @@ const codexBin = process.env.GPT_WEB_LOGIN_CODEX_BIN || 'codex';
 const bridgeCwd = process.env.GPT_WEB_LOGIN_CWD || process.cwd();
 const maxStdinBytes = positiveIntEnv('GPT_WEB_LOGIN_MAX_STDIN_BYTES', 2 * 1024 * 1024);
 const childTimeoutMs = positiveIntEnv('GPT_WEB_LOGIN_CHILD_TIMEOUT_MS', 300000);
+const statusTimeoutMs = positiveIntEnv('GPT_WEB_LOGIN_STATUS_TIMEOUT_MS', Math.min(childTimeoutMs, 15000));
 
 function positiveIntEnv(name, fallback) {
   const raw = process.env[name];
@@ -54,7 +55,7 @@ function requirePrompt(args) {
   return prompt;
 }
 
-function runCodex(args, stdin = undefined) {
+function runCodex(args, stdin = undefined, options = {}) {
   const env = {
     PATH: process.env.PATH,
     HOME: process.env.HOME,
@@ -85,7 +86,7 @@ function runCodex(args, stdin = undefined) {
     encoding: 'utf8',
     input: stdin,
     maxBuffer: 64 * 1024 * 1024,
-    timeout: childTimeoutMs,
+    timeout: options.timeoutMs || childTimeoutMs,
     env,
   });
 }
@@ -100,7 +101,7 @@ function codexFailureDetails(result) {
 }
 
 function codexAuthStatus() {
-  const result = runCodex(['doctor', '--all', '--json']);
+  const result = runCodex(['doctor', '--all', '--json'], undefined, { timeoutMs: statusTimeoutMs });
   const output = (result.stdout || '').trim();
   if (result.error || result.signal || !output) {
     const details = codexFailureDetails(result);
@@ -205,17 +206,9 @@ function codexAsk(prompt) {
   return text;
 }
 
-function assertAvailableProvider() {
+function assertSupportedProvider() {
   if (provider !== 'codex') {
     throw new Error('only provider shipped by this skill is codex');
-  }
-
-  const auth = codexAuthStatus();
-  if (auth.error) {
-    throw new Error('local provider status could not be confirmed');
-  }
-  if (!auth.available) {
-    throw new Error('authenticated provider unavailable');
   }
 }
 
@@ -260,7 +253,7 @@ try {
       status();
       break;
     case 'smoke': {
-      assertAvailableProvider();
+      assertSupportedProvider();
       const text = codexAsk('Return exactly GPT_WEB_LOGIN_BRIDGE_OK.');
       console.log(text);
       if (text !== 'GPT_WEB_LOGIN_BRIDGE_OK') process.exit(1);
@@ -268,7 +261,7 @@ try {
     }
     case 'ask': {
       const prompt = requirePrompt(args);
-      assertAvailableProvider();
+      assertSupportedProvider();
       console.log(codexAsk(prompt));
       break;
     }
