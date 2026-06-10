@@ -636,6 +636,9 @@ exit 0
   if (!machineMemoryJs.includes('runGbrainStreaming(args')) {
     fail('machine-memory runner must stream official gbrain sync output to the terminal');
   }
+  if (!machineMemoryJs.includes('sync requires --source <id>') || !machineMemoryJs.includes('--all-sources')) {
+    fail('machine-memory runner must require --source unless all-sources is explicit');
+  }
   if (!machineMemoryJs.includes('estimateRemaining(startedAt')) {
     fail('machine-memory runner must print estimated remaining time');
   }
@@ -1266,6 +1269,7 @@ exit 0
     'sync',
     '--roots',
     freshSyncRoot,
+    '--all-sources',
     '--dry-run',
     '--json',
   ], {
@@ -1293,6 +1297,7 @@ exit 0
 	    'sync',
 	    '--roots',
 	    freshSyncRoot,
+	    '--all-sources',
 	    '--dry-run',
 	    '--json',
 	  ], {
@@ -1344,6 +1349,7 @@ exit 0
     'sync',
     '--roots',
     repoRoot,
+    '--all-sources',
     '--dry-run',
     '--json',
   ], {
@@ -1431,6 +1437,8 @@ exit 0
     '--roots',
     repoRoot,
     '--no-register',
+    '--source',
+    'mm-current-11111111',
     '--no-extract',
     '--no-schema-pack',
     '--json',

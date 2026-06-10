@@ -45,6 +45,8 @@ Options:
   --max-depth <n>          Discovery depth. Default: ${DEFAULT_MAX_DEPTH}.
   --no-register           Do not create missing GBrain sources.
   --no-sync               Register only; do not sync.
+  --source <id>           Sync only this source id. Repeat for more sources.
+  --all-sources           Explicitly sync every matching source under roots.
   --no-pull               Pass --no-pull to gbrain sync. Default on.
   --pull                  Allow gbrain sync to git pull.
   --no-embed              Pass --no-embed to gbrain sync. Default off.
@@ -73,6 +75,8 @@ function parseArgs(argv) {
     maxDepth: DEFAULT_MAX_DEPTH,
     register: true,
     sync: true,
+    sourceIds: splitPathList(process.env.GBRAIN_MACHINE_SOURCE || process.env.GBRAIN_MACHINE_SOURCES || ''),
+    allSources: false,
     noPull: true,
     noEmbed: false,
     noExtract: false,
@@ -109,6 +113,12 @@ function parseArgs(argv) {
         break;
       case '--no-sync':
         opts.sync = false;
+        break;
+      case '--source':
+        opts.sourceIds.push(args[++i] || '');
+        break;
+      case '--all-sources':
+        opts.allSources = true;
         break;
       case '--no-pull':
         opts.noPull = true;
@@ -155,6 +165,13 @@ function parseArgs(argv) {
   }
   if (!['none', 'all'].includes(opts.terminateServe)) {
     throw new Error('--terminate-serve must be one of: none, all');
+  }
+  opts.sourceIds = opts.sourceIds.map((id) => id.trim()).filter(Boolean);
+  if (opts.sourceIds.length > 0 && opts.allSources) {
+    throw new Error('use either --source <id> or --all-sources, not both');
+  }
+  if (opts.sync && opts.sourceIds.length === 0 && !opts.allSources) {
+    throw new Error('sync requires --source <id>. Use --all-sources only when you intentionally want every matching source.');
   }
   if (process.platform === 'win32' && opts.terminateServe !== 'none') {
     throw new Error('--terminate-serve=all is not supported on Windows; stop gbrain serve before scheduled sync or use none');
@@ -765,9 +782,18 @@ function progressLog(opts, message) {
 }
 
 async function syncSources(sources, repoPaths, opts) {
+  const requestedIds = new Set(opts.sourceIds || []);
   const targetSources = sources
     .filter((source) => sourceLocalPath(source))
-    .filter((source) => repoPaths.some((repoPath) => samePath(sourceLocalPath(source), repoPath)));
+    .filter((source) => repoPaths.some((repoPath) => samePath(sourceLocalPath(source), repoPath)))
+    .filter((source) => opts.allSources || requestedIds.has(sourceId(source)));
+  if (!opts.allSources) {
+    const foundIds = new Set(targetSources.map((source) => sourceId(source)).filter(Boolean));
+    const missing = [...requestedIds].filter((id) => !foundIds.has(id));
+    if (missing.length > 0) {
+      throw new Error(`requested source(s) not found under selected roots: ${missing.join(', ')}`);
+    }
+  }
   const dryRunPlannedOnly = opts.dryRun && targetSources.every((source) => source.__planned);
   const configSourceIndex = dryRunPlannedOnly ? buildSourceIndex([]) : buildSourceIndex(listConfigSources());
   const syncStatusIndex = dryRunPlannedOnly ? buildSourceIndex([]) : buildSourceIndex(listSyncStatusSources());
