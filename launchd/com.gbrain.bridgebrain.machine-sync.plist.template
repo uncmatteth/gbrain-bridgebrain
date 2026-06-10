@@ -38,6 +38,8 @@
     <string>@TERMINATE_SERVE@</string>
     <key>GBRAIN_MACHINE_SYNC_TIMEOUT_SECONDS</key>
     <string>@SYNC_TIMEOUT_SECONDS@</string>
+    <key>GBRAIN_MACHINE_GBRAIN_TIMEOUT_SECONDS</key>
+    <string>@GBRAIN_TIMEOUT_SECONDS@</string>
   </dict>
 
   <key>StandardOutPath</key>
