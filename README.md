@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/uncmatteth-gbrain-bridgebrain-badge.png)](https://mseep.ai/app/uncmatteth-gbrain-bridgebrain)
+
 # GBrain BridgeBrain
 
 Local side-brain installer for GBrain: Codex ChatGPT-login embeddings, no Ollama, no GPU, no extra embedding API key.
