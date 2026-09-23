@@ -1,0 +1,33 @@
+{
+  "name": "bridgebrain-direct-chat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Direct local MCP tools for ChatGPT. No model provider or Codex subprocess.",
+  "type": "commonjs",
+  "bin": {
+    "bridgebrain-direct": "cli.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "check": "node --check core.js && node --check transport.js && node --check cli.js && node --test test/*.test.js",
+    "start": "node cli.js serve --stdio"
+  },
+  "engines": {
+    "node": ">=18.17"
+  },
+  "files": [
+    "core.js",
+    "transport.js",
+    "cli.js",
+    "ui_backend.py",
+    "requirements-ui.txt",
+    "README.md",
+    "SECURITY.md",
+    "TESTING.md",
+    "AGENTS.md",
+    "LICENSE",
+    "test/*.js",
+    "test/*.py"
+  ],
+  "license": "MIT"
+}
