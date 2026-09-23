@@ -1,0 +1,8 @@
+node_modules/
+__pycache__/
+*.pyc
+*.tgz
+.venv/
+state/
+config.json
+*.log

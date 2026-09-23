@@ -1,0 +1,4 @@
+# Optional only. The direct file/command/Git/MCP tools need no npm or Python packages.
+playwright==1.57.0
+PyAutoGUI==0.9.54
+Pillow==12.3.0
